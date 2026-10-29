@@ -7,6 +7,8 @@ export { checkRecord, checkValue } from "./schema.js";
 export { encodePacket, decodePacket } from "./packet.js";
 export {
   quantize,
+  fillQuant,
+  updateBytes,
   defaultState,
   applyState,
   cloneState,
@@ -15,7 +17,10 @@ export {
   materialize,
 } from "./state.js";
 export { userText, isUserText, asPlain } from "./keys.js";
-export { canon, plainClone, valueBytes, encodeValue } from "./custom.js";
+export { EMPTY, canon, customEqual, plainClone, valueBytes, encodeValue, encodeOps } from "./custom.js";
+export { customOps } from "./state.js";
 export { createWriter, createReader } from "./bin.js";
+export { createSink } from "./sink.js";
+export { writeUpdate } from "./fields.js";
 export { toU16, fromU16, wrapAngle } from "./quant.js";
 export { fnv1a, stable } from "./hash.js";

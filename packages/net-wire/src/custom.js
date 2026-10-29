@@ -167,11 +167,50 @@ function canonObj(v) {
   return "{" + keys.map((k) => JSON.stringify(k) + ":" + canon(v[k])).join(",") + "}";
 }
 
+/** Shared empty custom dict. Compared by identity on the hot path. Never mutate it. */
+export const EMPTY = Object.create(null);
+
 /** @param {Record<string, unknown>} src */
 export function cloneCustom(src) {
+  if (src === EMPTY) return EMPTY;
+  const keys = Object.keys(src || {});
+  if (keys.length === 0) return EMPTY;
   const out = Object.create(null);
-  for (const k of Object.keys(src || {})) out[k] = cloneVal(src[k]);
+  for (const k of keys) out[k] = cloneVal(src[k]);
   return out;
+}
+
+/** Structural compare. Skips JSON so the per-tick diff does not allocate strings. */
+export function customEqual(a, b) {
+  if (a === b) return true;
+  if (!a || !b) return !a && !b;
+  return objEqual(a, b);
+}
+
+/** @param {Record<string, unknown>} a @param {Record<string, unknown>} b */
+function objEqual(a, b) {
+  const keys = Object.keys(a);
+  if (keys.length !== Object.keys(b).length) return false;
+  for (const key of keys) {
+    if (!Object.prototype.hasOwnProperty.call(b, key) || !valEqual(a[key], b[key])) return false;
+  }
+  return true;
+}
+
+/** @param {unknown} a @param {unknown} b */
+function valEqual(a, b) {
+  if (a === b) return true;
+  if (Array.isArray(a)) return Array.isArray(b) && arrEqual(a, b);
+  if (a && b && typeof a === "object" && typeof b === "object")
+    return objEqual(/** @type {Record<string, unknown>} */ (a), /** @type {Record<string, unknown>} */ (b));
+  return false;
+}
+
+/** @param {unknown[]} a @param {unknown[]} b */
+function arrEqual(a, b) {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (!valEqual(a[i], b[i])) return false;
+  return true;
 }
 
 /** @param {unknown} v */

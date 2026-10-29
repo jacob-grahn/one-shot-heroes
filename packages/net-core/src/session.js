@@ -13,10 +13,10 @@ import {
   sendClient,
   sendDirect,
   sendHello,
-  sendState,
   trackDespawn,
   trackSpawn,
 } from "./relay.js";
+import { refreshSlots, sendDirty } from "./state-send.js";
 import { mulberry32 } from "./rng.js";
 import { PROTOCOL, canon, decodePacket, defineManifest, quantize } from "./wire.js";
 import { createWorld } from "./world.js";
@@ -81,7 +81,9 @@ function blank(options) {
     tomb: new Set(),
     samples: new Map(),
     decode: decodePacket,
-    stats: { packets: 0, bytes: 0, maxPacket: 0, sends: [] },
+    slots: new Map(),
+    sink: null,
+    stats: freshStats(),
   };
   s.rng = mulberry32(s.seed);
   s.est = () => (s.isHost ? s.shownTick : s.lastHostTick + (s.steps - s.lastHostAt));
@@ -89,6 +91,16 @@ function blank(options) {
   if (s.isHost) s.players.push({ id: playerId, host: true });
   if (!s.isHost && !s.hostPeerId) throw new Error("client needs hostPeerId");
   return s;
+}
+
+function freshStats() {
+  return {
+    packets: 0,
+    bytes: 0,
+    maxPacket: 0,
+    sends: [],
+    phases: { diff: 0, grid: 0, priority: 0, encode: 0, alloc: 0, other: 0 },
+  };
 }
 
 /** @param {any} transport */
@@ -193,6 +205,7 @@ function step(s) {
 
 /** @param {any} s */
 function stepHost(s) {
+  const t = performance.now();
   drain(s);
   rememberLocal(s);
   const prev = noteAnims(s);
@@ -203,6 +216,8 @@ function stepHost(s) {
     s.inUpdate = false;
   }
   stampAnims(s, prev);
+  s.stats.phases.other += performance.now() - t;
+  refreshSlots(s);
   for (const peer of s.peers.values()) sendPeer(s, peer);
   pruneInputs(s);
   s.shownTick = s.tick;
@@ -212,7 +227,7 @@ function stepHost(s) {
 /** @param {any} s @param {any} peer */
 function sendPeer(s, peer) {
   flushReliable(s, peer);
-  if (peer.live) sendState(s, peer);
+  if (peer.live) sendDirty(s, peer);
 }
 
 /** @param {any} s */

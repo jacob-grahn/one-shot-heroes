@@ -43,23 +43,33 @@ function bench() {
     net.advance(dt);
   }
   const before = host.stats.bytes;
-  const started = Date.now();
+  const phases = { ...host.stats.phases };
+  let hostMs = 0;
   for (let i = 0; i < TICKS; i++) {
-    for (const session of sessions) session.step();
+    const t = performance.now();
+    host.step();
+    hostMs += performance.now() - t;
+    for (const session of sessions) if (session !== host) session.step();
     net.advance(dt);
   }
-  const elapsed = Date.now() - started;
+  const ms = hostMs / TICKS;
+  const phase = (name) => ((host.stats.phases[name] - phases[name]) / TICKS).toFixed(3);
   const bytes = host.stats.bytes - before;
-  const seconds = TICKS / manifest.tickHz;
-  const perSec = Math.round(bytes / seconds);
+  const perSec = Math.round(bytes / (TICKS / manifest.tickHz));
   const line = [
     `BENCH n=${N} e=${E} budget=${manifest.budget}`,
-    `msPerTick=${(elapsed / TICKS).toFixed(3)}`,
+    `msPerTick=${ms.toFixed(3)}`,
+    `diff=${phase("diff")}`,
+    `grid=${phase("grid")}`,
+    `priority=${phase("priority")}`,
+    `encode=${phase("encode")}`,
+    `alloc=${phase("alloc")}`,
+    `other=${phase("other")}`,
     `maxPacket=${host.stats.maxPacket}`,
     `sessionBytesPerSec=${perSec}`,
     `hostUplinkKiBPerSec=${(perSec / 1024).toFixed(2)}`,
   ].join(" ");
-  if (host.stats.maxPacket > manifest.budget) throw new Error(line);
+  if (host.stats.maxPacket > manifest.budget || ms > 8) throw new Error(line);
   console.log(line);
 }
 

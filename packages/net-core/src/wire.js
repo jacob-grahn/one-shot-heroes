@@ -1,17 +1,26 @@
 /** Single import surface for @osh/net-wire, so the codec module stays under the fan-in cap. */
 
 export {
+  EMPTY,
+  MSG,
+  PROTOCOL,
   applyState,
   canon,
   checkRecord,
   cloneState,
+  createSink,
+  customOps,
   decodePacket,
   defaultState,
   defineManifest,
+  diffMask,
+  encodeOps,
   encodePacket,
+  fillQuant,
   materialize,
   plainClone,
-  PROTOCOL,
   quantize,
   sameState,
+  updateBytes,
+  writeUpdate,
 } from "@osh/net-wire";

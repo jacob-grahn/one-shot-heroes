@@ -1,10 +1,9 @@
 /** Host send path: reliable spawn/snapshot and unreliable prioritized deltas. */
 
-import { ackHeader, nextSeq, rememberSent } from "./ack.js";
-import { avatarFocus, relevance } from "./focus.js";
-import { packBudget, takeBatches } from "./pack.js";
+import { ackHeader, nextSeq } from "./ack.js";
+import { takeBatches } from "./pack.js";
 import { createPeer } from "./peer.js";
-import { cloneState, defaultState, encodePacket, quantize, sameState } from "./wire.js";
+import { cloneState, defaultState, encodePacket, quantize } from "./wire.js";
 
 /** @param {any} s @param {string} to @param {Uint8Array} bytes @param {{ reliable?: boolean, ids?: number[] }} [opts] */
 export function emit(s, to, bytes, opts) {
@@ -39,16 +38,17 @@ export function trackDespawn(s, entity) {
   for (const peer of s.peers.values()) {
     if (!peer.live) continue;
     peer.queue.push({ type: "despawn", id: entity.id });
-    clearPeerEntity(peer, entity.id);
+    clearPeerEntity(s, peer, entity.id);
   }
 }
 
-/** @param {any} peer @param {number} id */
-function clearPeerEntity(peer, id) {
+/** @param {any} s @param {any} peer @param {number} id */
+function clearPeerEntity(s, peer, id) {
   peer.confirmed.delete(id);
   peer.ver.delete(id);
   peer.acc.delete(id);
   peer.dirtyAt.delete(id);
+  if (s.slots) s.slots.delete(id);
 }
 
 /** @param {any} s @param {any} entity @param {any} cur */
@@ -138,119 +138,6 @@ export function flushReliable(s, peer) {
 function sendReliable(s, peer, batch) {
   const bytes = encodePacket({ ...head(s, 1), ...ackHeader(peer) }, batch);
   emit(s, peer.peerId, bytes, { reliable: true });
-}
-
-/** @param {any} s @param {any} peer */
-export function sendState(s, peer) {
-  const packets = packBudget(candidates(s, peer), s.manifest.starvationK, (group) =>
-    fitsState(s, group),
-  );
-  for (const group of packets) sendGroup(s, peer, group);
-}
-
-/** @param {any} s @param {any} peer */
-function candidates(s, peer) {
-  const list = [];
-  for (const entity of s.world.query()) {
-    const item = consider(s, peer, entity);
-    if (item) list.push(item);
-  }
-  list.sort((a, b) => b.pri - a.pri || a.id - b.id);
-  return list;
-}
-
-/** @param {any} s @param {any} peer @param {any} entity */
-function consider(s, peer, entity) {
-  if (entity.local) return null;
-  const cur = quantize(entity, s.manifest.quant);
-  const conf = peer.confirmed.get(entity.id);
-  if (!conf) return null;
-  if (sameState(cur, conf.q)) {
-    peer.dirtyAt.delete(entity.id);
-    return null;
-  }
-  return dirtyItem(s, peer, { entity, cur, conf });
-}
-
-/** @param {any} s @param {any} peer @param {{ entity: any, cur: any, conf: any }} bag */
-function dirtyItem(s, peer, bag) {
-  const entity = bag.entity;
-  if (!peer.dirtyAt.has(entity.id)) peer.dirtyAt.set(entity.id, s.tick);
-  const age = s.tick - peer.dirtyAt.get(entity.id);
-  const acc = bump(s, peer, entity);
-  const pri = age >= s.manifest.starvationK ? 1e12 + age : acc;
-  return { id: entity.id, cur: bag.cur, base: bag.conf.q, baseVersion: bag.conf.version, age, pri };
-}
-
-/** @param {any} s @param {any} peer @param {any} entity */
-function bump(s, peer, entity) {
-  const rel = relevance(s.manifest.focus, entity, focusFor(s, peer.playerId), s.manifest.cell);
-  const base = priorityOf(s, entity.type);
-  const acc = (peer.acc.get(entity.id) || 0) + base * rel * (1 / s.manifest.tickHz);
-  peer.acc.set(entity.id, acc);
-  return acc;
-}
-
-/** @param {any} s @param {number} playerId */
-function focusFor(s, playerId) {
-  if (s.manifest.focus === "none") return null;
-  if (s.manifest.focus === "game") return s.focus.get(playerId) || { x: 0, y: 0 };
-  return avatarFocus(findAvatar(s, playerId), s.hints.get(playerId), s.manifest.focusClamp);
-}
-
-/** @param {any} s @param {number} playerId */
-function findAvatar(s, playerId) {
-  const key = s.manifest.avatarOwnerKey;
-  for (const entity of s.world.query(s.manifest.avatarType)) {
-    if (entity.custom && entity.custom[key] === playerId) return entity;
-  }
-  return null;
-}
-
-/** @param {any} s @param {string} type */
-function priorityOf(s, type) {
-  const spec = s.manifest.types[type];
-  const pri = spec && spec.priority;
-  return typeof pri === "number" && pri > 0 ? pri : 1;
-}
-
-/** @param {any} s @param {any[]} group */
-function fitsState(s, group) {
-  if (!group.length) return true;
-  return (
-    encodePacket(head(s, 0), [{ type: "state", records: group.map(preview) }]).length <=
-    s.manifest.budget
-  );
-}
-
-/** @param {any} item */
-function preview(item) {
-  return { id: item.id, version: 1, baseVersion: item.baseVersion, cur: item.cur, base: item.base };
-}
-
-/** @param {any} s @param {any} peer @param {any[]} group */
-function sendGroup(s, peer, group) {
-  const records = group.map((item) => commit(s, peer, item));
-  const seq = nextSeq(peer);
-  const ids = records.map((rec) => rec.id);
-  const bytes = encodePacket({ ...head(s, 0), seq, ...ackHeader(peer) }, [
-    { type: "state", records },
-  ]);
-  emit(s, peer.peerId, bytes, { ids });
-  rememberSent(
-    peer,
-    seq,
-    records.map((rec) => ({ id: rec.id, version: rec.version, full: cloneState(rec.cur) })),
-  );
-}
-
-/** @param {any} s @param {any} peer @param {any} item */
-function commit(s, peer, item) {
-  const version = (peer.ver.get(item.id) || 0) + 1;
-  peer.ver.set(item.id, version);
-  peer.acc.set(item.id, 0);
-  peer.dirtyAt.set(item.id, s.tick);
-  return { id: item.id, version, baseVersion: item.baseVersion, cur: item.cur, base: item.base };
 }
 
 /** @param {any} s */
