@@ -1,0 +1,38 @@
+{
+  "name": "one-shot-heroes",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev -w apps/editor",
+    "build": "npm run build -w apps/editor",
+    "preview": "npm run preview -w apps/editor",
+    "typecheck": "tsc --noEmit -p jsconfig.json",
+    "lint": "eslint . && npm run lint:gate && npm run lint:fmt-gate",
+    "deps": "npm run deps:gate && npm run deps:local",
+    "test": "npm run build && node apps/editor/test/run.js",
+    "lint:gate": "eslint --no-config-lookup --config tools/gate/size-gate.eslint.mjs .",
+    "deps:gate": "STRUCTURE_CORE=\"^apps/editor/src/core/|^packages/(format|palette|timing)/\" STRUCTURE_UI=\"^apps/editor/src/(ui|persist|api)/|^apps/editor/src/(main|ready)\\\\.js$\" STRUCTURE_EDITOR=\"^apps/editor/\" STRUCTURE_SANDBOX=\"^(packages/runtime|apps/sandbox)/\" STRUCTURE_SHARED=\"^apps/editor/src/(ui/dom|ui/state/context|core/editor-core)\\\\.js$|^packages/format/src/(validate|limits)\\\\.js$\" depcruise --config tools/gate/structure.cruiser.cjs --output-type err-long apps packages",
+    "deps:local": "depcruise apps packages --config .dependency-cruiser.cjs",
+    "mi": "node tools/mi.mjs",
+    "check": "npm run typecheck && npm run lint && npm run deps",
+    "lint:fmt-gate": "sh tools/fmt-gate.sh"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.5",
+    "dependency-cruiser": "^17.4.3",
+    "eslint": "^9.39.5",
+    "eslint-plugin-html": "^8.2.1",
+    "eslint-plugin-sonarjs": "^4.2.2",
+    "fta-cli": "^3.1.0",
+    "globals": "^17.13.0",
+    "prettier": "^3.9.10",
+    "typescript": "~5.9",
+    "typescript-eslint": "^8.72.1",
+    "vite": "^8.3.5",
+    "vite-plugin-singlefile": "^2.3.4"
+  }
+}

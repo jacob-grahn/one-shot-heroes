@@ -1,0 +1,8 @@
+{
+  "extensions": [".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".mts", ".cts"],
+  "exclude_filenames": [".d.ts", ".min.js", ".bundle.js"],
+  "exclude_directories": ["/node_modules"],
+  "exclude_under": 1,
+  "score_cap": 100000,
+  "output_limit": 100000
+}

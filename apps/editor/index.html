@@ -1,0 +1,133 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>One Shot Heroes · Pixel Editor</title>
+<link rel="stylesheet" href="./src/styles/editor.css">
+<script type="module" src="./src/main.js"></script>
+</head><body>
+<div id="app">
+  <div class="skips"><a class="skip" href="#view" id="skipCanvas">Skip to canvas</a><a class="skip" href="#palette" id="skipPalette">Skip to palette</a></div>
+  <header id="topbar">
+    <h1 class="brand">One Shot Heroes <span>Pixel Editor</span></h1>
+    <input id="docName" value="untitled" spellcheck="false" title="Document name" aria-label="Document name" maxlength="64">
+    <div class="btns">
+      <button type="button" data-act="new" title="New document (Ctrl+Alt+N)">New</button>
+      <button type="button" data-act="open" title="Open JSON (Ctrl+O)">Open</button>
+      <button type="button" data-act="save" title="Save JSON (Ctrl+S)">Save</button>
+      <span class="sep"></span>
+      <button type="button" data-act="exportPng" title="Export current frame PNG (at the chosen scale)">Export PNG</button>
+      <button type="button" data-act="exportSheet" title="Export sprite sheet PNG + JSON (Aseprite-compatible, at the chosen scale)">Export Sheet</button>
+      <label class="expscale" title="Export scale (nearest-neighbour, for sharing and game engines)">Scale <select id="expScale" aria-label="Export scale"><option value="1">1×</option><option value="2">2×</option><option value="4">4×</option><option value="8">8×</option></select></label>
+      <button type="button" data-act="resize" title="Resize / crop the canvas">Canvas size…</button>
+      <span class="sep"></span>
+      <button type="button" data-act="undo" title="Undo (Ctrl+Z)" aria-label="Undo" disabled aria-disabled="true">&#x21B6;</button>
+      <button type="button" data-act="redo" title="Redo (Ctrl+Shift+Z / Ctrl+Y)" aria-label="Redo" disabled aria-disabled="true">&#x21B7;</button>
+      <span class="sep"></span>
+      <button type="button" data-act="example" title="Load the example hero (asks first if you have unsaved changes; Ctrl+Z brings your sprite back)">Load example</button>
+      <button type="button" data-act="help" title="Shortcuts (?)" aria-label="Keyboard shortcuts">?</button>
+    </div>
+    <span id="saveStatus" role="status" aria-live="polite" data-state="idle"></span>
+    <div id="prov" title="Provenance: authors of ops in the log" aria-live="polite"></div>
+  </header>
+
+  <section id="optbar" aria-label="Tool options">
+    <label class="opt" data-for="pencil,eraser,line">Size
+      <select id="optSize"><option>1</option><option>2</option><option>3</option></select></label>
+    <label class="opt" data-for="pencil"><input type="checkbox" id="optPP" checked> Pixel-perfect</label>
+    <label class="opt" data-for="rect,ellipse"><input type="checkbox" id="optFilled"> Filled</label>
+    <label class="opt" data-for="fill"><input type="checkbox" id="optContig" checked> Contiguous</label>
+    <span class="sep"></span>
+    <label class="opt always" title="Horizontal symmetry (mirror left/right)"><input type="checkbox" id="optMirH"> Mirror &#x2194;</label>
+    <label class="opt always" title="Vertical symmetry (mirror top/bottom)"><input type="checkbox" id="optMirV"> Mirror &#x2195;</label>
+    <span class="sep"></span>
+    <label class="opt always" title="Pixel grid (Ctrl+')"><input type="checkbox" id="optGrid" checked> Grid</label>
+    <label class="opt always" title="Tiled 3x3 preview"><input type="checkbox" id="optTile"> Tile</label>
+    <label class="opt always" title="Onion skin (F3)"><input type="checkbox" id="optOnion"> Onion</label>
+    <span class="sep"></span>
+    <span class="xf" role="group" aria-label="Transform (applies to the selection if any, else the chosen scope)">
+      <button type="button" id="xfFlipH" title="Flip horizontal (Shift+H)" aria-label="Flip horizontal">&#x21C6;</button>
+      <button type="button" id="xfFlipV" title="Flip vertical (Shift+V)" aria-label="Flip vertical">&#x21C5;</button>
+      <button type="button" id="xfRotCCW" title="Rotate 90° counter-clockwise" aria-label="Rotate 90 degrees counter-clockwise">&#x21BA;</button>
+      <button type="button" id="xfRotCW" title="Rotate 90° clockwise (Shift+R)" aria-label="Rotate 90 degrees clockwise">&#x21BB;</button>
+      <select id="xfScope" title="Transform scope when nothing is selected" aria-label="Transform scope"><option value="cel">Cel</option><option value="frame">Frame</option><option value="layer">Layer</option></select>
+    </span>
+    <span class="grow"></span>
+    <button type="button" id="zoomOut" title="Zoom out (-)" aria-label="Zoom out">&minus;</button>
+    <span id="zoomLbl">100%</span>
+    <button type="button" id="zoomIn" title="Zoom in (+)" aria-label="Zoom in">+</button>
+    <button type="button" id="zoomFit" title="Fit (0)">Fit</button>
+  </section>
+
+  <nav id="tools" aria-label="Tools"></nav>
+
+  <main id="stage">
+    <canvas id="view" tabindex="0" aria-label="Sprite canvas. Draw with the mouse, or with the keyboard: arrows move the pixel cursor, Enter or Space uses the tool, Backspace erases. Press ? for all shortcuts." aria-describedby="srStatus"></canvas>
+    <div id="status"></div>
+    <div id="srStatus" class="sr-only" role="status" aria-live="polite"></div>
+    <input type="file" id="fileInput" accept=".json,application/json" class="hidden-input" aria-label="Open sprite file" tabindex="-1">
+    <input type="file" id="palFileInput" accept=".hex,.txt" class="hidden-input" aria-label="Import palette file" tabindex="-1">
+  </main>
+
+  <aside id="side">
+    <section class="panel">
+      <h2>Palette <span id="palInfo"></span></h2>
+      <div class="colors">
+        <div id="ccPrimary" class="cc" title="Primary (left click)" role="img" aria-label="Primary colour"></div>
+        <div id="ccSecondary" class="cc" title="Secondary (right click)" role="img" aria-label="Secondary colour"></div>
+        <button type="button" id="swapColors" title="Swap (X)">&#x21C4;</button>
+        <select id="palPreset" title="Replace palette with a preset (Space or Alt+Down opens the list)" aria-label="Palette preset (Space or Alt+Down opens the list)"></select>
+      </div>
+      <div id="palette" role="group" aria-label="Palette (arrows move, Enter: primary, Shift+Enter: secondary)"></div>
+      <div class="row">
+        <button type="button" id="palAdd" title="Add color">+ Add</button>
+        <button type="button" id="palEdit" title="Edit primary color (double-click a swatch)">Edit</button>
+        <button type="button" id="palDel" title="Remove primary color (pixels become transparent)">Remove</button>
+        <button type="button" id="palImport" title="Import hex list">Import</button>
+        <button type="button" id="palExport" title="Export .hex">Export</button>
+      </div>
+      <input type="color" id="colorInput" class="hidden-input" aria-label="Edit palette color" tabindex="-1">
+    </section>
+    <section class="panel">
+      <h2>Preview <span class="fps">15 fps</span></h2>
+      <div class="row">
+        <select id="pvAnim" title="Animation to preview" aria-label="Animation to preview"></select>
+        <button type="button" id="pvPlay" title="Play / pause (Enter)">&#x25B6;</button>
+      </div>
+      <div id="pvBox">
+        <canvas id="pv1" title="1x native" aria-label="Preview at native size"></canvas>
+        <canvas id="pvN" title="scaled" aria-label="Scaled preview"></canvas>
+      </div>
+      <div class="row small">
+        <select id="pvScale" aria-label="Preview scale"><option value="2">2x</option><option value="3">3x</option><option value="4" selected>4x</option></select>
+        <select id="pvBg" aria-label="Preview background"><option value="checker">Checker</option><option value="dark">Dark</option><option value="sky">Sky</option><option value="grass">Grass</option></select>
+        <span id="pvInfo"></span>
+      </div>
+    </section>
+    <section class="panel grow">
+      <h2>Layers</h2>
+      <div class="row">
+        <button type="button" id="layAdd" title="New layer (Shift+N)">+ Layer</button>
+        <button type="button" id="layDel" title="Delete layer">Delete</button>
+        <button type="button" id="layUp" title="Move up" aria-label="Move layer up">&#x25B2;</button>
+        <button type="button" id="layDown" title="Move down" aria-label="Move layer down">&#x25BC;</button>
+        <label class="small">Opacity <input type="range" id="layOpacity" min="0" max="100" value="100"></label>
+      </div>
+      <div id="layers" role="group" aria-label="Layers (arrows move, Enter selects, F2 renames)"></div>
+    </section>
+  </aside>
+
+  <footer id="timeline">
+    <div class="tlbar">
+      <button type="button" id="frAdd" title="New empty frame">+ Frame</button>
+      <button type="button" id="frDup" title="Duplicate frame (Alt+N)">Duplicate</button>
+      <button type="button" id="frDel" title="Delete frame">Delete</button>
+      <button type="button" id="frLeft" title="Move frame left">&#x25C0;</button>
+      <button type="button" id="frRight" title="Move frame right">&#x25B6;</button>
+      <span class="sep"></span>
+      <button type="button" id="anAdd" title="New named animation from the selected frames (shift-click to select a range)">+ Animation</button>
+      <span class="hint">Shift-click (or Shift+Enter) frames to select a range. Click cells in an animation row to toggle frames. Double-click a name (or F2) to rename. Arrows move between cells.</span>
+    </div>
+    <div id="tlgrid" role="group" aria-label="Timeline (arrows move between frames and animation rows, Enter toggles)"></div>
+  </footer>
+</div>
+
+<div id="modal" class="hidden"><div class="mbox" role="dialog" aria-modal="true" aria-labelledby="mTitle"><div id="mbody"></div><p id="mErr" class="merr hidden" role="alert"></p><div class="mbtns"><button type="button" id="mCancel">Cancel</button><button type="button" id="mOk" class="primary">OK</button></div></div></div>
+</body></html>
