@@ -30,6 +30,31 @@ module.exports = {
         pathNot: '^apps/editor/src/(ui/dom|ui/state/context|core/editor-core)\\.js$|^packages/format/src/(validate|limits)\\.js$',
       },
     },
+    {
+      name: 'net-core-not-mediator', severity: 'error',
+      comment: 'The in-game library must not import the host-page mediator. The game can tamper with the in-game library.',
+      from: { path: '^packages/net-core/src/' }, to: { path: '^packages/net-mediator/' },
+    },
+    {
+      name: 'net-core-not-sim', severity: 'error',
+      comment: 'net-core is transport-agnostic. The simulated transport, and later WebRTC, is injected.',
+      from: { path: '^packages/net-core/src/' }, to: { path: '^packages/net-sim/' },
+    },
+    {
+      name: 'net-mediator-not-core', severity: 'error',
+      comment: 'The mediator parses the wire format itself so a tampered in-game library cannot raise its caps.',
+      from: { path: '^packages/net-mediator/' }, to: { path: '^packages/net-core/' },
+    },
+    {
+      name: 'net-wire-pure', severity: 'error',
+      comment: 'The wire codec has no session, transport, mediator, or editor dependency.',
+      from: { path: '^packages/net-wire/' }, to: { path: '^packages/(net-core|net-sim|net-mediator)/|^apps/' },
+    },
+    {
+      name: 'net-sim-transport-only', severity: 'error',
+      comment: 'The simulated transport moves bytes. It does not import the game library, the wire codec, or the mediator.',
+      from: { path: '^packages/net-sim/' }, to: { path: '^packages/(net-core|net-wire|net-mediator)/|^apps/' },
+    },
     { name: 'no-dev-deps-in-src', severity: 'error', from: { path: '^(apps|packages)/[^/]+/src/' }, to: { dependencyTypes: ['npm-dev'] } },
     { name: 'not-to-unresolvable', severity: 'error', from: {}, to: { couldNotResolve: true } },
   ],
