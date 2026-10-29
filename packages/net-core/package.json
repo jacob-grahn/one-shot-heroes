@@ -1,0 +1,14 @@
+{
+  "name": "@osh/net-core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "dependencies": {
+    "@osh/net-wire": "0.1.0",
+    "@osh/timing": "0.1.0"
+  }
+}
