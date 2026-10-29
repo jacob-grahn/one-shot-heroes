@@ -53,7 +53,7 @@ The browser suite needs Chrome (`CHROME`, default `/usr/bin/google-chrome`) and 
 
 ## CI
 
-Pushes to `main` and pull requests run [`.github/workflows/ci.yml`](.github/workflows/ci.yml). Each check is its own job: typecheck, lint (`eslint .`, size and complexity gate, format-based size gate), dependency structure, maintainability index, build (the built `dist/index.html` is uploaded), the browser suite on its own runner, gitleaks over the full history, `npm audit --audit-level=high`, dependency review on pull requests, and actionlint. `npm run mi` reports scores and does not fail when a module is under 10.
+Pushes to `main` and pull requests run [`.github/workflows/ci.yml`](.github/workflows/ci.yml). Each check is its own job: typecheck, lint (`eslint .`, size and complexity gate, format-based size gate), dependency structure, maintainability index, build (the built `dist/index.html` is uploaded), the browser suite on its own runner, gitleaks over the full history, `npm audit --audit-level=high`, dependency review on pull requests, and actionlint. `npm run mi` reports scores and does not fail when a module is under 10. Dependency review runs only after [Dependency graph](https://github.com/jacob-grahn/one-shot-heroes/settings/security_analysis) is enabled; until then that job skips with a note.
 
 ## Notes
 

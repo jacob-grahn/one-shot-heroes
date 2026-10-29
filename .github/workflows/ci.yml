@@ -157,7 +157,38 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # The review action errors with "Dependency review is not supported" when Dependency
+      # graph is off (this repo's SBOM API returns 404). That is a repo setting, not a finding.
+      - name: Check dependency graph
+        id: graph
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          status=$(curl -sS -o /tmp/dep-graph.json -w '%{http_code}' \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/dependency-graph/sbom")
+          if [ "$status" = "200" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          elif [ "$status" = "404" ]; then
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Dependency graph disabled::Enable Dependency graph at ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/settings/security_analysis (Settings → Code security → Dependency graph). Dependency review is skipped until then."
+            {
+              echo "### Dependency review skipped"
+              echo
+              echo "Dependency graph is off, so GitHub cannot review dependency changes."
+              echo "Turn on **Dependency graph** at [Code security settings](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/settings/security_analysis)."
+              echo "After that, this job fails the pull request when a new dependency has a known vulnerability."
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Unexpected dependency graph response HTTP ${status}" >&2
+            cat /tmp/dep-graph.json >&2
+            exit 1
+          fi
       - name: Dependency review
+        if: steps.graph.outputs.enabled == 'true'
         uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
 
   actionlint:
