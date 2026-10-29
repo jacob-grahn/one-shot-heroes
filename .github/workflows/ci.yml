@@ -110,8 +110,17 @@ jobs:
             sudo apt-get install -y /tmp/chrome.deb
           fi
           test -x /usr/bin/google-chrome
-          google-chrome --version
+          # Headless Chrome throttles background tabs. The multi-tab fallback-lock
+          # trials need those tabs to answer BroadcastChannel hellos within 150 ms.
+          printf '%s\n' \
+            '#!/bin/bash' \
+            'exec /usr/bin/google-chrome --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-renderer-backgrounding --disable-features=CalculateNativeWinOcclusion,IntensiveWakeUpThrottling "$@"' \
+            | sudo tee /usr/local/bin/google-chrome-ci >/dev/null
+          sudo chmod 755 /usr/local/bin/google-chrome-ci
+          /usr/local/bin/google-chrome-ci --version
       - name: Browser tests
+        env:
+          CHROME: /usr/local/bin/google-chrome-ci
         run: npm test
 
   gitleaks:
