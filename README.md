@@ -1,5 +1,7 @@
 # one-shot-heroes
 
+[![CI](https://github.com/jacob-grahn/one-shot-heroes/actions/workflows/ci.yml/badge.svg)](https://github.com/jacob-grahn/one-shot-heroes/actions/workflows/ci.yml)
+
 One-Shot Heroes pixel editor workspace.
 
 npm workspaces (private, nothing is published). The editor is a Vite app of plain ES modules; the sprite format,
@@ -48,6 +50,10 @@ The browser suite needs Chrome (`CHROME`, default `/usr/bin/google-chrome`) and 
 - Structure: no cycles, no orphans, core does not import UI or DOM packages, packages do not import apps, no unresolvable
   imports, production code does not import tests, fan-in ≤ 10 except the allow-listed shared modules
   (`STRUCTURE_SHARED` in the `deps:gate` script; reasons in `../restructure/NOTES-for-reviewers.md`).
+
+## CI
+
+Pushes to `main` and pull requests run [`.github/workflows/ci.yml`](.github/workflows/ci.yml). Each check is its own job: typecheck, lint (`eslint .`, size and complexity gate, format-based size gate), dependency structure, maintainability index, build (the built `dist/index.html` is uploaded), the browser suite on its own runner, gitleaks over the full history, `npm audit --audit-level=high`, dependency review on pull requests, and actionlint. `npm run mi` reports scores and does not fail when a module is under 10.
 
 ## Notes
 

@@ -1,0 +1,183 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  typecheck:
+    name: typecheck
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install dependencies
+        uses: ./.github/actions/npm-ci
+      - name: Typecheck
+        run: npm run typecheck
+
+  lint:
+    name: lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install dependencies
+        uses: ./.github/actions/npm-ci
+      - name: ESLint
+        run: npx eslint .
+      - name: Size and complexity gate
+        run: npm run lint:gate
+      - name: Format-based size gate
+        run: npm run lint:fmt-gate
+
+  deps:
+    name: deps
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install dependencies
+        uses: ./.github/actions/npm-ci
+      - name: Dependency structure
+        run: npm run deps
+
+  maintainability:
+    name: maintainability
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install dependencies
+        uses: ./.github/actions/npm-ci
+      # tools/mi.mjs is report-only. It exits 0 when modules are under 10.
+      - name: Maintainability index
+        run: |
+          set -o pipefail
+          npm run mi | tee mi.txt
+          {
+            echo '```'
+            cat mi.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  build:
+    name: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install dependencies
+        uses: ./.github/actions/npm-ci
+      - name: Build
+        run: npm run build
+      - name: Upload dist
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: editor-dist
+          path: apps/editor/dist/index.html
+          if-no-files-found: error
+
+  # Own runner. The suite is timing-sensitive (multi-tab freezes) and should not share a machine.
+  test:
+    name: test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install dependencies
+        uses: ./.github/actions/npm-ci
+      - name: Install Chrome
+        run: |
+          set -euo pipefail
+          if [ ! -x /usr/bin/google-chrome ]; then
+            curl -sSfL -o /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+            sudo apt-get update
+            sudo apt-get install -y /tmp/chrome.deb
+          fi
+          test -x /usr/bin/google-chrome
+          google-chrome --version
+      - name: Browser tests
+        run: npm test
+
+  gitleaks:
+    name: gitleaks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      # OSS binary. No license key. gitleaks-action requires one for organization accounts.
+      - name: Install gitleaks
+        run: |
+          set -euo pipefail
+          version=8.30.1
+          archive="gitleaks_${version}_linux_x64.tar.gz"
+          curl -sSfL -o "/tmp/${archive}" "https://github.com/gitleaks/gitleaks/releases/download/v${version}/${archive}"
+          echo "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb  /tmp/${archive}" | sha256sum -c -
+          tar -xzf "/tmp/${archive}" -C /tmp gitleaks
+          sudo install -m 0755 /tmp/gitleaks /usr/local/bin/gitleaks
+          gitleaks version
+      - name: Scan full history
+        run: gitleaks detect --source "$GITHUB_WORKSPACE" --redact --no-banner --exit-code 1
+
+  audit:
+    name: audit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install dependencies
+        uses: ./.github/actions/npm-ci
+      - name: Audit
+        run: npm audit --audit-level=high
+
+  dependency-review:
+    name: dependency-review
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Dependency review
+        uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+
+  actionlint:
+    name: actionlint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install actionlint
+        run: |
+          set -euo pipefail
+          version=1.7.12
+          archive="actionlint_${version}_linux_amd64.tar.gz"
+          curl -sSfL -o "/tmp/${archive}" "https://github.com/rhysd/actionlint/releases/download/v${version}/${archive}"
+          echo "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8  /tmp/${archive}" | sha256sum -c -
+          tar -xzf "/tmp/${archive}" -C /tmp actionlint
+          sudo install -m 0755 /tmp/actionlint /usr/local/bin/actionlint
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
+          actionlint -version
+      - name: Lint workflows
+        run: actionlint -color

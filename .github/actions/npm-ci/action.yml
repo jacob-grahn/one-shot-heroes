@@ -1,0 +1,16 @@
+name: Install npm dependencies
+description: Set up Node.js 22 and install from the lockfile, with the npm cache.
+
+runs:
+  using: composite
+  steps:
+    - name: Setup Node
+      uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      with:
+        node-version: "22"
+        cache: npm
+        cache-dependency-path: package-lock.json
+
+    - name: Install dependencies
+      shell: bash
+      run: npm ci
