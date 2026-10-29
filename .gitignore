@@ -1,0 +1,15 @@
+node_modules/
+dist/
+coverage/
+.nyc_output/
+test-results/
+playwright-report/
+*.log
+npm-debug.log*
+
+.env*
+
+.DS_Store
+Thumbs.db
+desktop.ini
+ehthumbs.db
