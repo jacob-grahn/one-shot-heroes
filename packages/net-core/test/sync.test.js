@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { animFrame, blend, clampFocus, createSession, defineManifest } from "@osh/net-core";
+import { readOnly } from "../src/view.js";
 import { createNetwork } from "@osh/net-sim";
 import { encodePacket } from "@osh/net-wire";
 import { connect, party, run, settle } from "./party.js";
@@ -68,6 +69,12 @@ test("random is seeded and render state is read-only", () => {
   });
   assert.equal(first.net.random(), second.net.random());
   assert.throws(() => first.render(() => {}), /read-only/);
+  const view = readOnly({ entities: [{ x: 1 }] }, true);
+  assert.throws(() => Object.defineProperty(view, "extra", { value: 1 }), /read-only/);
+  assert.throws(() => Object.setPrototypeOf(view, {}), /read-only/);
+  assert.throws(() => {
+    delete view.entities;
+  }, /read-only/);
 });
 
 test("only the host runs update, and clients cannot spawn networked entities", () => {
@@ -352,7 +359,7 @@ function focusOrder(mode, setup) {
     focus: mode,
     avatarType: "dot",
     avatarOwnerKey: "owner",
-    budget: 64,
+    budget: 76,
     starvationK: 100,
     tickHz: 20,
     custom: { owner: { type: "int", min: 0, max: 7 } },

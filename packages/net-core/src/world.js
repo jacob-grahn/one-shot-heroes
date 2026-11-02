@@ -2,7 +2,7 @@
 
 import { createEntity } from "./entity.js";
 
-/** @param {{ canSpawn: (local: boolean) => boolean, canDespawn: () => boolean, onSpawn: (e: any) => void, onDespawn: (e: any) => void }} hooks */
+/** @param {{ canSpawn: (local: boolean) => boolean, canDespawn: () => boolean, onSpawn: (e: any) => void, onDespawn: (e: any) => void, allocId: () => number }} hooks */
 export function createWorld(hooks) {
   const ctx = { byId: new Map(), list: [], hooks, nextId: 1, localId: 0 };
   return {
@@ -35,7 +35,7 @@ export function createWorld(hooks) {
 function spawn(ctx, type, init, opts) {
   const local = !!(opts && opts.local);
   if (!ctx.hooks.canSpawn(local)) throw new Error("only the host spawns networked entities");
-  const id = local ? (ctx.localId -= 1) : ctx.nextId++;
+  const id = local ? (ctx.localId -= 1) : ctx.hooks.allocId();
   const entity = createEntity(id, type, init, local);
   add(ctx, entity);
   if (!local) ctx.hooks.onSpawn(entity);

@@ -14,7 +14,7 @@ export function rememberLocal(s) {
 export function rememberRemote(s, playerId, sample) {
   if (!inWindow(s, sample.tick) || !checkRecord(s.manifest.inputs, sample.values, false)) return;
   const bag = log(s, playerId);
-  const cap = s.manifest.inputRedundancy + LEAD + 2;
+  const cap = behindOf(s) + LEAD + 2;
   if (!bag.has(sample.tick) && bag.size >= cap) return;
   if (!bag.has(sample.tick)) bag.set(sample.tick, sample.values);
 }
@@ -23,8 +23,12 @@ const LEAD = 4;
 
 /** @param {any} s @param {number} stamp */
 function inWindow(s, stamp) {
-  const behind = s.manifest.inputRedundancy;
-  return stamp >= s.tick - behind && stamp <= s.tick + LEAD;
+  return stamp >= s.tick - behindOf(s) && stamp <= s.tick + LEAD;
+}
+
+/** Two seconds of ticks, so a round trip longer than the repeated history still applies. */
+function behindOf(s) {
+  return Math.max(s.manifest.inputRedundancy, s.manifest.tickHz * 2);
 }
 
 /** @param {any} s */
@@ -39,7 +43,7 @@ function pick(s, playerId) {
   const bag = s.inputLog.get(playerId);
   if (!bag) return null;
   if (bag.has(s.tick)) return bag.get(s.tick);
-  return newest(bag, s.tick, s.manifest.inputRedundancy);
+  return newest(bag, s.tick, behindOf(s));
 }
 
 /** @param {Map<number, any>} bag @param {number} tick @param {number} window */
@@ -76,7 +80,7 @@ export function pushHist(s, stamp, values) {
 
 /** @param {any} s */
 export function pruneInputs(s) {
-  const behind = s.manifest.inputRedundancy + 2;
+  const behind = behindOf(s) + 2;
   for (const bag of s.inputLog.values()) dropOld(bag, s.tick, behind);
 }
 

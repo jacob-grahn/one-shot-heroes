@@ -3,17 +3,21 @@
 /** @param {any[]} items @param {(group: any[]) => boolean} fits */
 export function takeBatches(items, fits) {
   const batches = [];
+  const overflow = [];
   let cur = [];
   for (const item of items) {
+    if (!fits([item])) {
+      overflow.push(item);
+      continue;
+    }
     if (cur.length && !fits(cur.concat([item]))) {
       batches.push(cur);
       cur = [];
     }
-    if (!fits([item])) return { batches, overflow: item };
     cur.push(item);
   }
   if (cur.length) batches.push(cur);
-  return { batches, overflow: null };
+  return { batches, overflow };
 }
 
 /**

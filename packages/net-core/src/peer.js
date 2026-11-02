@@ -8,6 +8,7 @@ export function createPeer(peerId, playerId) {
     live: false,
     /** @type {any[]} */
     queue: [],
+    pendingSpawns: new Map(),
     confirmed: new Map(),
     ver: new Map(),
     acc: new Map(),

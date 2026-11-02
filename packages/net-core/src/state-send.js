@@ -75,8 +75,10 @@ function consider(s, peer, entity) {
   }
   if (!peer.dirtyAt.has(entity.id)) peer.dirtyAt.set(entity.id, s.tick);
   const customLen = mask & 64 ? customSize(cur, conf.q) : 0;
-  if (updateBytes(mask, customLen) + 20 > s.manifest.budget)
-    throw new Error("custom data exceeds the byte budget");
+  if (updateBytes(mask, customLen) + 20 > s.manifest.budget) {
+    s.stats.skipped += 1;
+    return null;
+  }
   return itemOf(entity, cur, conf, {
     age: s.tick - peer.dirtyAt.get(entity.id),
     size: updateBytes(mask, customLen),

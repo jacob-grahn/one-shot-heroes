@@ -50,7 +50,7 @@ function spill(packets, rest, k, budget) {
   let used = OVERHEAD;
   for (const item of rest) {
     if (item.age < k) continue;
-    if (item.size + OVERHEAD > budget) throw new Error("entity exceeds byte budget");
+    if (item.size + OVERHEAD > budget) continue;
     if (used + item.size > budget) {
       packets.push(extra);
       extra = [];

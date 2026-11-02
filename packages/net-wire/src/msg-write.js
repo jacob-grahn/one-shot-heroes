@@ -42,12 +42,13 @@ function writeSpawn(w, m) {
 }
 
 function writeDespawn(w, m) {
-  w.u16(m.id);
+  w.u32(m.id >>> 0);
 }
 
 function writeEvent(w, m) {
   w.u32(m.id >>> 0);
   w.u8(m.origin & 255);
+  w.u16((m.epoch || 0) >>> 0);
   writeShort(w, m.name);
   encodeValue(w, m.payload, 0);
 }

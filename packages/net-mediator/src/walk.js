@@ -19,19 +19,21 @@ export function walk(caps, draft, packet, size) {
 function one(caps, draft, message, size) {
   if (message.type === "hello") return hello(draft);
   if (message.type === "spawn") return spawn(caps, draft, message.record);
-  if (message.type === "despawn") return despawn(draft);
+  if (message.type === "despawn") return despawn(draft, message);
+  if (message.type === "bye") return bye(draft);
   if (message.type === "snap") return snap(caps, draft, message, size);
   if (message.type === "state") return records(caps, message.records);
   if (message.type === "input") return samples(caps, message.samples);
-  if (message.type === "event") return eventCap(caps, message);
+  if (message.type === "event") return eventCap(caps, draft, message);
   return "";
 }
 
-/** @param {any} caps @param {any} message */
-function eventCap(caps, message) {
+/** @param {any} caps @param {any} draft @param {any} message */
+function eventCap(caps, draft, message) {
   const name = typeof message.name === "string" ? message.name : "";
   if (!name || name.length > caps.maxName) return "name";
   if (name.length + valueBytes(message.payload) > caps.maxEventBytes) return "event";
+  draft.events = (draft.events || 0) + 1;
   return walkValue(message.payload, 1, caps);
 }
 
@@ -41,9 +43,16 @@ function hello(draft) {
   return "";
 }
 
+/** @param {any} draft @param {any} message */
+function despawn(draft, message) {
+  if (!draft.despawnIds) draft.despawnIds = [];
+  draft.despawnIds.push(message.id >>> 0);
+  return "";
+}
+
 /** @param {any} draft */
-function despawn(draft) {
-  draft.entities = Math.max(0, draft.entities - 1);
+function bye(draft) {
+  draft.bye = true;
   return "";
 }
 
@@ -56,11 +65,17 @@ function spawn(caps, draft, record) {
 
 /** @param {any} caps @param {any} draft @param {any} message @param {number} size */
 function snap(caps, draft, message, size) {
-  if (message.index === 0) draft.snapBytes = 0;
+  if (message.index === 0) {
+    draft.snapBytes = 0;
+    draft.snapReset = true;
+  }
   draft.snapBytes += size;
   if (draft.snapBytes > caps.maxSnapshotBytes) return "snapshot";
   if (message.total > caps.maxEntities) return "entities";
   draft.snapEntities = message.total;
+  draft.snapDone = message.index + 1 === message.count;
+  if (!draft.snapIds) draft.snapIds = [];
+  for (const record of message.records || []) draft.snapIds.push(record.id);
   return records(caps, message.records);
 }
 

@@ -19,11 +19,13 @@ import {
 import { refreshSlots, sendDirty } from "./state-send.js";
 import { mulberry32 } from "./rng.js";
 import { PROTOCOL, canon, decodePacket, defineManifest, quantize } from "./wire.js";
+import { recheckCustom } from "./entity.js";
 import { createWorld } from "./world.js";
 
 /** @param {Record<string, any>} options */
 export function createSession(options) {
   const s = blank(options);
+  initIds(s);
   s.world = createWorld(hooks(s));
   s.net = createNet(s);
   s.sendDirect = (message) => sendDirect(s, message);
@@ -49,7 +51,7 @@ function blank(options) {
     game: options.game,
     dev: options.dev !== false,
     trace: !!options.trace,
-    seed: options.seed ?? 1,
+    seed: options.seed == null ? freshSeed() : options.seed >>> 0,
     proto: PROTOCOL,
     tick: 0,
     shownTick: 0,
@@ -94,11 +96,23 @@ function blank(options) {
   return s;
 }
 
+/** @param {any} s */
+function initIds(s) {
+  s.freeIds = [];
+  s.nextNetId = 1;
+  s.grave = new Map();
+  s.unsentFree = [];
+  s.epochs = new Map();
+  s.nextEpoch = 0;
+}
+
 function freshStats() {
   return {
     packets: 0,
     bytes: 0,
     maxPacket: 0,
+    reliableDrops: 0,
+    skipped: 0,
     sends: [],
     phases: { diff: 0, grid: 0, priority: 0, encode: 0, alloc: 0, other: 0 },
   };
@@ -126,6 +140,7 @@ function hooks(s) {
   return {
     canSpawn: (local) => local || s.isHost,
     canDespawn: () => s.isHost,
+    allocId: () => (s.freeIds.length ? s.freeIds.pop() : s.nextNetId++),
     onSpawn: (entity) => {
       if (s.isHost) trackSpawn(s, entity);
     },
@@ -133,6 +148,24 @@ function hooks(s) {
       if (s.isHost) trackDespawn(s, entity);
     },
   };
+}
+
+/** Ids that never left the host become reusable after this step's spawns. */
+function releaseUnsent(s) {
+  for (const id of s.unsentFree) s.freeIds.push(id);
+  s.unsentFree.length = 0;
+}
+
+function freshSeed() {
+  const cryptoRef = /** @type {{ getRandomValues?: (array: Uint32Array) => Uint32Array }} */ (
+    /** @type {any} */ (globalThis).crypto
+  );
+  if (cryptoRef && cryptoRef.getRandomValues) {
+    const buf = new Uint32Array(1);
+    cryptoRef.getRandomValues(buf);
+    return buf[0] || 1;
+  }
+  return (Math.random() * 0x100000000) >>> 0 || 1;
 }
 
 /** @param {any} s */
@@ -156,6 +189,13 @@ function leave(s, peerId) {
   s.hints.delete(peer.playerId);
   s.focus.delete(peer.playerId);
   s.seen.delete(peer.playerId);
+  s.epochs.delete(peer.playerId);
+  for (const [id, wait] of s.grave) {
+    wait.delete(peerId);
+    if (wait.size) continue;
+    s.grave.delete(id);
+    s.freeIds.push(id);
+  }
   announce(s);
 }
 
@@ -195,6 +235,9 @@ function facade(s) {
     close() {
       close(s);
     },
+    dropPeer(peerId) {
+      s.dropPeer(String(peerId));
+    },
     digest() {
       return digest(s);
     },
@@ -217,6 +260,7 @@ function stepHost(s) {
   s.inUpdate = true;
   try {
     s.game.update(1 / s.manifest.tickHz, inputsFor(s), s.world, s.net);
+    for (const entity of s.world.live()) recheckCustom(entity);
   } finally {
     s.inUpdate = false;
   }
@@ -225,6 +269,7 @@ function stepHost(s) {
   refreshSlots(s);
   for (const peer of s.peers.values()) sendPeer(s, peer);
   pruneInputs(s);
+  releaseUnsent(s);
   s.shownTick = s.tick;
   s.tick += 1;
 }

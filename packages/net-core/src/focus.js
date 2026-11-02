@@ -31,6 +31,7 @@ export function clampFocus(origin, hint, radius) {
 /** @param {{ x: number, y: number } | null} avatar @param {{ x: number, y: number } | undefined} hint @param {number} radius */
 export function avatarFocus(avatar, hint, radius) {
   if (!avatar) return { x: 0, y: 0 };
-  if (!hint) return { x: avatar.x, y: avatar.y };
+  if (!hint || !Number.isFinite(hint.x) || !Number.isFinite(hint.y))
+    return { x: avatar.x, y: avatar.y };
   return clampFocus(avatar, hint, radius);
 }

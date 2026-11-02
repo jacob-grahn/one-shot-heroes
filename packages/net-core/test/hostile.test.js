@@ -4,6 +4,7 @@ import { createSession, defineManifest } from "@osh/net-core";
 import { createNetwork } from "@osh/net-sim";
 import { encodePacket } from "@osh/net-wire";
 import { createMediator } from "@osh/net-mediator";
+import { avatarFocus, relevance } from "../src/focus.js";
 import { rememberRemote } from "../src/input.js";
 
 const dt = 50;
@@ -21,19 +22,20 @@ function manifest() {
 }
 
 /** @param {any} [game] @param {number} [n] */
-function setup(game, n = 3) {
+function setup(game, n = 3, spec = manifest()) {
   const net = createNetwork({ seed: 1 });
   const sessions = [];
   for (let i = 0; i < n; i++) {
     sessions.push(
       createSession({
-        manifest: manifest(),
+        manifest: spec,
         game: game || quiet(),
         transport: net.endpoint("p" + i),
         playerId: i,
         peerId: "p" + i,
         isHost: i === 0,
         hostPeerId: i ? "p0" : "",
+        trace: true,
       }),
     );
   }
@@ -51,6 +53,16 @@ function setup(game, n = 3) {
 
 function quiet() {
   return { init() {}, update() {}, render() {} };
+}
+
+function mover() {
+  return {
+    init() {},
+    update(_dt, _inputs, world) {
+      for (const entity of world.query()) entity.x += 0;
+    },
+    render() {},
+  };
 }
 
 /** @param {any[]} messages */
@@ -243,16 +255,35 @@ test("future input ticks are discarded", () => {
 });
 
 test("a NaN focus hint is ignored", () => {
-  const group = setup();
-  group.atk.send(
-    "p0",
-    pkt([{ type: "hello", playerId: 4, proto: 1, hash: manifest().hash }]),
-    true,
-  );
+  const focus = avatarFocus({ x: 3, y: 4 }, { x: NaN, y: Infinity }, 64);
+  assert.equal(focus.x, 3);
+  assert.equal(focus.y, 4);
+  assert.equal(Number.isFinite(relevance("avatar", { x: 0, y: 0 }, focus, 32)), true);
+  const spec = defineManifest({
+    maxPlayers: 8,
+    focus: "avatar",
+    avatarType: "pawn",
+    avatarOwnerKey: "owner",
+    budget: 200,
+    starvationK: 100,
+    custom: { owner: { type: "int", min: 0, max: 8 } },
+  });
+  const group = setup(mover(), 2, spec);
+  assert.throws(() => group.sessions[1].net.setFocusHint(NaN, Infinity), /finite/);
+  group.atk.send("p0", pkt([{ type: "hello", playerId: 4, proto: 1, hash: spec.hash }]), true);
   group.run(3);
+  const pawn = group.host.world.spawn("pawn", { x: 0, y: 0, custom: { owner: 4 } });
+  group.host.world.spawn("far", { x: 700, y: 0 });
+  group.run(2);
   group.atk.send("p0", encodePacket({ tick: 1 }, [{ type: "hint", x: NaN, y: Infinity }]), false);
-  assert.doesNotThrow(() => group.run(2));
-  assert.equal(group.host.ended, false);
+  pawn.x = 2;
+  const mark = group.host.stats.sends.length;
+  assert.doesNotThrow(() => group.run(4));
+  const first = group.host.stats.sends
+    .slice(mark)
+    .find((packet) => packet.ids && packet.ids.length);
+  assert.equal(first.ids[0], pawn.id);
+  assert.equal(Number.isFinite(group.sessions[1].world.query("pawn")[0].x), true);
 });
 
 test("oversized custom data is rejected at spawn and when it is set", () => {
@@ -264,8 +295,11 @@ test("oversized custom data is rejected at spawn and when it is set", () => {
     /custom data exceeds 1024 bytes/,
   );
   const blob = group.host.world.spawn("blob", {});
-  blob.custom = huge;
-  assert.throws(() => group.host.step(), /custom data exceeds the byte budget/);
+  assert.throws(() => {
+    blob.custom = huge;
+  }, /custom data exceeds 1024 bytes/);
+  assert.equal(Object.keys(blob.custom).length, 0);
+  assert.doesNotThrow(() => group.host.step());
   assert.equal(group.host.ended, false);
 });
 

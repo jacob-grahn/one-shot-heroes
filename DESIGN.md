@@ -98,7 +98,7 @@ At the default 20 Hz that is 0.75 frames per sim tick. At `tickHz` 15 it is exac
 
 Topology is a star. Clients talk only to the host. The wrapper tells a client the host's peer id.
 
-Reliable messages: handshake (`protocol` + game hash), spawn, despawn, `net.emit` events, the late-join snapshot, welcome/reject/bye. Unreliable: entity state, inputs, focus hints. Inputs repeat the last few ticks. The host applies a tick's input once, after checking it against the manifest. A bad sample is dropped.
+Reliable messages: handshake (`protocol` + game hash), spawn, despawn, `net.emit` events, the late-join snapshot, welcome/reject/bye. Unreliable: entity state, inputs, focus hints. Inputs repeat the last few ticks. The host applies a tick's input once, after checking it against the manifest. A bad sample is dropped. The host keeps samples in `[tick - max(inputRedundancy, tickHz * 2), tick + 4]`, so a round trip longer than the repeated history still applies, up to about two seconds. A sample older than that is dropped.
 
 The handshake compares `manifest.hash` (FNV-1a of the canonical manifest) and protocol version 1. A mismatch rejects the peer. If the host leaves, clients end with `host_left`.
 
@@ -112,7 +112,7 @@ Each recipient has its own baseline, version counter, and Gaffer accumulator:
 acc += basePriority * relevance * dt
 ```
 
-`basePriority` comes from `manifest.types[type].priority` (default 1). Sending an entity resets its accumulator to 0. Packets are filled up to the byte budget, highest accumulator first, not up to a fixed item count. One voluntary packet is sent per recipient per tick. If a dirty entity is still unsent and its age is at least K ticks, extra packets go out the same tick until it has been sent. Resends use the same K bound so a lost packet is retried. No single packet exceeds the budget. Custom data over 1024 bytes throws from `world.spawn` before the entity exists. Custom data that later outgrows the byte budget throws `custom data exceeds the byte budget` on the next host step, before that entity's version advances.
+`basePriority` comes from `manifest.types[type].priority` (default 1). Sending an entity resets its accumulator to 0. Packets are filled up to the byte budget, highest accumulator first, not up to a fixed item count. One voluntary packet is sent per recipient per tick. If a dirty entity is still unsent and its age is at least K ticks, extra packets go out the same tick until it has been sent. Resends use the same K bound so a lost packet is retried. No single packet exceeds the budget. Custom data over 1024 bytes throws `custom data exceeds 1024 bytes` at the assignment (`entity.custom = …` or a property set on that object) and at `world.spawn`, before the value is stored. Send paths do not throw: a record that cannot fit is skipped, counted on `stats.reliableDrops`, and, when it is a reliable message already queued, that peer is disconnected.
 
 Relevance:
 
@@ -136,19 +136,35 @@ Keys must be declared in the manifest (`custom`, `inputs`, `events`). The schema
 
 `net.random()` is a mulberry32 stream seeded by the session seed (the welcome message carries it). Call order matters. It is for host `update`. `net.time` is seconds of the host clock (`tick / tickHz`).
 
-`render` receives a deep copy. In dev mode (the default) writing it throws `render state is read-only`. With `dev: false` the copy is frozen.
+`render` receives a deep copy. In dev mode (the default) `set`, `deleteProperty`, `defineProperty`, and `setPrototypeOf` throw `render state is read-only`. With `dev: false` the copy is frozen. Dev-mode render is about 2 ms per frame at 500 entities with custom data. That cost is the deep copy plus the proxy, and it is acceptable for local play.
 
 ## Mediator
 
-`createMediator({ now, caps, onDisconnect }).wrap(transport)` checks each datagram. Byte, spawn, and join windows are kept per peer and per direction, so one noisy peer cannot spend the room the others need. Spawns are counted once per entity id, at the source, not once per recipient. The 64 KiB/s per-peer cap is what makes the measured ~163 KiB/s host uplink (about 24 KiB/s on each of seven links) fit. Outbound reliable traffic is still forwarded when a byte window is already full, because dropping a spawn or a snapshot would desync that client. Any other reliable failure is not delivered: `onDisconnect` runs so the host page can drop that peer instead of leaving it half-synced. Unreliable traffic over the cap is dropped and resent by the normal ack loop. `inspect(bytes)` is the same check. The walk also rejects event names longer than `maxName` and event payloads over `maxEventBytes`.
+`createMediator({ now, caps, onDisconnect }).wrap(transport)` checks each datagram. Byte, spawn, and join windows are kept per peer and per direction. `seenSpawns` is the set of live entity ids: a spawn adds an id, a despawn removes it, and a finished snapshot replaces the set. The entity cap is that live count, not the number of spawns since the process started. Spawns are counted once per id, at the source, not once per recipient.
+
+The 64 KiB/s per-peer cap is what makes the measured ~163 KiB/s host uplink (about 24 KiB/s on each of seven links) fit. Only host `spawn`, `snap`, and `despawn` messages may exceed that byte window. Every other outbound reliable message, including a relayed event, stops at 75% of the cap so at least a quarter of the link stays available for unreliable state. Outbound reliable traffic over 2× the cap (128 KiB/s) for more than one second disconnects that peer (`reliable_ceiling`).
+
+A relayed event is charged to the sender's inbound byte window, including the fan-out, and to a per-sender relay window of `bytesPerSecond / 8`. Over that limit the event is not forwarded and `onDisconnect(peerId, code)` runs. The library does not drop the peer by itself. The host page must wire it:
+
+```js
+const mediator = createMediator({
+  onDisconnect(peerId) {
+    host.dropPeer(peerId);
+  },
+});
+```
+
+`host.dropPeer` removes that peer and frees ids once every remaining peer has acked their despawn. Unreliable traffic over the cap is dropped and resent by the normal ack loop. A lane is created for a peer id the first time it is seen, including an id that has not sent `hello`. The map is capped at 64; the oldest lane that is not in the joined set is evicted. `inspect(bytes)` is the same check. The walk also rejects event names longer than `maxName` and event payloads over `maxEventBytes`.
 
 `@osh/net-core/src/wire.js` is the only module that imports `@osh/net-wire`. The codec would otherwise be imported from enough call sites to trip the fan-in gate. The file is a barrel on purpose.
 
-Peer events are delivered only when the name is in the manifest and the payload matches. They are relayed to other peers only when that event sets `relay: true`. Event strings decode as `{ text, userContent: true }`. Event ids are a per-sender sliding window of 64, and the host replaces `origin` with the joined player's id.
+Peer events are delivered only when the name is in the manifest and the payload matches. They are relayed to other peers only when that event sets `relay: true`. Event strings decode as `{ text, userContent: true }`. Each join gets an epoch. The dedupe key is origin plus epoch plus id, a sliding window of 64, and a new epoch resets that window on the host and on every client. The host replaces `origin` with the joined player's id.
 
-A client resends hello until it is welcomed or rejected. Custom data over 1024 bytes throws `custom data exceeds 1024 bytes` from `world.spawn` before the entity exists.
+Entity ids are `u32` on the wire. The host reuses an id only after every peer that was sent the despawn has acked it, or at the end of the step if the spawn never left the queue. Clients drop the tombstone when a later spawn reuses the id.
 
-The host loop is not running in a Worker in this deliverable. `@osh/net-core` does not touch the DOM, so a later host page can call `step` from a Worker. That move is planned, not done.
+A client resends hello until it is welcomed or rejected. If the page does not pass `seed`, the host draws one with `crypto.getRandomValues` and sends it in the welcome, so `net.random` is not the same sequence in every session.
+
+The host loop is not running in a Worker. `@osh/net-core` does not touch the DOM. Moving `step` into a Worker is a hard prerequisite before a real WebRTC host ships: a background tab throttles timers to about 1 Hz and would stall the room. It is not done in this change.
 
 ## Deviations
 
@@ -160,4 +176,5 @@ The host loop is not running in a Worker in this deliverable. `@osh/net-core` do
 - `net.tick` is exposed so a game can stamp `animStart`. The host also stamps it when `anim` changes and `animStart` does not.
 - Decoded strings are `{ text, userContent: true }`. The sending game still holds a plain string.
 - The host renders the latest tick. Clients interpolate. There is no client prediction.
+- Inputs older than `max(inputRedundancy, tickHz * 2)` ticks are dropped. That is about two seconds at the default tick rate.
 - The mediator's custom-size cap is per encoded custom payload (a spawn, a snapshot record, or a state delta), which is the unit that hits the wire.

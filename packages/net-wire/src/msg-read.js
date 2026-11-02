@@ -42,14 +42,15 @@ function readSpawn(r) {
 }
 
 function readDespawn(r) {
-  return { id: r.u16() };
+  return { id: r.u32() };
 }
 
 function readEvent(r) {
   const id = r.u32();
   const origin = r.u8();
+  const epoch = r.u16();
   const name = readShort(r);
-  return { id, origin, name, payload: decodeValue(r, 0) };
+  return { id, origin, epoch, name, payload: decodeValue(r, 0) };
 }
 
 function readSnap(r) {

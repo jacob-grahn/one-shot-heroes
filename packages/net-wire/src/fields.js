@@ -42,7 +42,7 @@ function readCustom(r, patch) {
 
 /** @param {ReturnType<import('./bin.js').createWriter>} w @param {Record<string, any>} rec */
 export function writeRecord(w, rec) {
-  w.u16(rec.id);
+  w.u32(rec.id >>> 0);
   writeShort(w, rec.type);
   writeIds(w, rec);
   writeFields(w, rec.cur, rec.base);
@@ -50,7 +50,7 @@ export function writeRecord(w, rec) {
 
 /** @param {ReturnType<import('./bin.js').createWriter>} w @param {Record<string, any>} rec */
 export function writeUpdate(w, rec) {
-  w.u16(rec.id);
+  w.u32(rec.id >>> 0);
   writeIds(w, rec);
   writeFields(w, rec.cur, rec.base);
 }
@@ -63,7 +63,7 @@ function writeIds(w, rec) {
 
 /** @param {ReturnType<import('./bin.js').createReader>} r */
 export function readRecord(r) {
-  const id = r.u16();
+  const id = r.u32();
   const type = readShort(r);
   const ids = readIds(r);
   return { id, type, ...ids, patch: readFields(r) };
@@ -71,7 +71,7 @@ export function readRecord(r) {
 
 /** @param {ReturnType<import('./bin.js').createReader>} r */
 export function readUpdate(r) {
-  const id = r.u16();
+  const id = r.u32();
   const ids = readIds(r);
   return { id, ...ids, patch: readFields(r) };
 }

@@ -36,9 +36,9 @@ export function fillQuant(slot, entity, q) {
   slot.custom = customSnap(entity.custom);
 }
 
-/** Byte size of one unreliable entity record, excluding the packet header. */
+/** Byte size of one unreliable entity record, excluding the packet header. Id is u32. */
 export function updateBytes(mask, customLen) {
-  let n = 11;
+  let n = 13;
   if (mask & F_X) n += 2;
   if (mask & F_Y) n += 2;
   if (mask & F_ROT) n += 2;

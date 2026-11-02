@@ -19,7 +19,7 @@ export function beginSnap(s) {
 
 /** @param {any} s @param {any} rec @param {number} tick */
 export function installRecord(s, rec, tick) {
-  if (s.tomb.has(rec.id)) return;
+  s.tomb.delete(rec.id);
   const quant = s.manifest.quant;
   const q = applyState(defaultState(quant), rec.patch);
   const entity = ensure(s, rec);

@@ -3,7 +3,7 @@ import { createWriter } from "@osh/net-wire";
 /** A spawn whose custom key is hostile. The encoder refuses to build this. */
 export function badKey(key) {
   const body = createWriter();
-  body.u16(1);
+  body.u32(1);
   body.u8(1);
   body.bytes(new TextEncoder().encode("e"));
   body.u32(0);

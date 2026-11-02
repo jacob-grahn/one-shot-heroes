@@ -53,6 +53,23 @@ test("wrap does not forward a reliable packet that fails a cap", () => {
   assert.equal(mediator.violations[0], "string");
 });
 
+test("despawn frees a live entity slot", () => {
+  const mediator = createMediator({
+    caps: { maxEntities: 300, spawnPerSecond: 100000, bytesPerSecond: 100000000 },
+    now: () => 0,
+  });
+  for (let n = 1; n <= 5000; n++) {
+    assert.equal(mediator.inspect(spawn(n, {})).ok, true);
+    assert.equal(mediator.inspect(despawn(n)).ok, true);
+  }
+  assert.deepEqual(mediator.violations, []);
+  const capped = createMediator({ caps: { maxEntities: 1 }, now: () => 0 });
+  assert.equal(capped.inspect(spawn(1, {})).ok, true);
+  assert.equal(capped.inspect(spawn(2, {})).code, "entities");
+  assert.equal(capped.inspect(despawn(1)).ok, true);
+  assert.equal(capped.inspect(spawn(2, {})).ok, true);
+});
+
 test("byte and join windows are per peer and per direction", () => {
   const fat = big();
   const limit = fat.length + 8;
@@ -81,6 +98,11 @@ function rate(bytes, times, cap, limit) {
     if (!result.ok) code = result.code;
   }
   return code;
+}
+
+/** @param {number} id */
+function despawn(id) {
+  return encodePacket({ tick: 1, seq: 1 }, [{ type: "despawn", id }]);
 }
 
 /** @param {number} id @param {any} custom */

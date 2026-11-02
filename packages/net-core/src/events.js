@@ -15,7 +15,14 @@ export function onEvent(s, name, fn) {
 export function emitEvent(s, name, payload) {
   const spec = specOf(s, name);
   if (!spec || !checkRecord(spec.fields, payload, false)) throw new Error("bad event " + name);
-  const message = { type: "event", id: (s.eventSeq += 1), origin: s.playerId, name, payload };
+  const message = {
+    type: "event",
+    id: (s.eventSeq += 1),
+    origin: s.playerId,
+    epoch: 0,
+    name,
+    payload,
+  };
   deliverEvent(s, message);
   if (s.isHost) queueEvent(s, message, "");
   else s.sendDirect(message);
@@ -32,6 +39,7 @@ export function acceptPeerEvent(s, message, playerId) {
     type: "event",
     id: message.id >>> 0,
     origin: playerId,
+    epoch: (s.epochs.get(playerId) || 0) >>> 0,
     name: message.name,
     payload: message.payload,
   };
@@ -49,19 +57,19 @@ export function queueEvent(s, message, skip) {
 
 /** @param {any} s @param {any} message */
 export function deliverEvent(s, message) {
-  if (!admit(s, message.origin >>> 0, message.id >>> 0)) return false;
+  if (!admit(s, message.origin >>> 0, message.epoch >>> 0, message.id >>> 0)) return false;
   const list = s.listeners.get(message.name) || [];
   const payload = copyPayload(message.payload);
   for (const fn of list) fn(payload);
   return true;
 }
 
-/** @param {any} s @param {number} origin @param {number} id */
-function admit(s, origin, id) {
+/** @param {any} s @param {number} origin @param {number} epoch @param {number} id */
+function admit(s, origin, epoch, id) {
   if (!id) return false;
   let slot = s.seen.get(origin);
-  if (!slot) {
-    slot = { next: 1, have: new Set() };
+  if (!slot || slot.epoch !== epoch) {
+    slot = { epoch, next: 1, have: new Set() };
     s.seen.set(origin, slot);
   }
   if (id < slot.next || id >= slot.next + WINDOW) return false;

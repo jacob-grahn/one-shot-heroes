@@ -44,11 +44,12 @@ export function confirmSent(peer, ack, bits) {
   for (const seq of seqsFromAck(ack, bits)) applySeq(peer, seq);
 }
 
-/** @param {{ sent: Map<number, any>, confirmed: Map<number, any> }} peer @param {number} seq */
+/** @param {{ sent: Map<number, any>, confirmed: Map<number, any>, noteFree?: (ids: number[]) => void }} peer @param {number} seq */
 function applySeq(peer, seq) {
   const pkt = peer.sent.get(seq);
   if (!pkt) return;
   for (const ent of pkt.ents) advance(peer, ent);
+  if (pkt.free && pkt.free.length && peer.noteFree) peer.noteFree(pkt.free);
   peer.sent.delete(seq);
 }
 
@@ -59,9 +60,9 @@ function advance(peer, ent) {
   peer.confirmed.set(ent.id, { version: ent.version, q: ent.full });
 }
 
-/** @param {any} peer @param {number} seq @param {any[]} ents */
-export function rememberSent(peer, seq, ents) {
-  peer.sent.set(seq, { ents });
+/** @param {any} peer @param {number} seq @param {any[]} ents @param {number[]} [free] */
+export function rememberSent(peer, seq, ents, free) {
+  peer.sent.set(seq, { ents, free: free || [] });
   for (const old of [...peer.sent.keys()]) {
     if (behind(seq, old) > 64) peer.sent.delete(old);
   }

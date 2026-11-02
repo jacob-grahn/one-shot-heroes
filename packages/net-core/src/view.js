@@ -37,6 +37,12 @@ const HANDLER = {
   deleteProperty() {
     throw new Error("render state is read-only");
   },
+  defineProperty() {
+    throw new Error("render state is read-only");
+  },
+  setPrototypeOf() {
+    throw new Error("render state is read-only");
+  },
 };
 
 /** @param {any} value */
