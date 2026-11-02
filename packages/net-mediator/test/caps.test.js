@@ -53,6 +53,25 @@ test("wrap does not forward a reliable packet that fails a cap", () => {
   assert.equal(mediator.violations[0], "string");
 });
 
+test("more than 64 peer ids are refused until an idle lane is evicted", () => {
+  let now = 0;
+  const mediator = createMediator({ now: () => now });
+  for (let i = 0; i < 64; i++) {
+    const result = mediator.inspect(hello(i + 1), {
+      peer: "p" + i,
+      dir: "in",
+      reliable: true,
+    });
+    assert.equal(result.ok, true);
+  }
+  const refused = mediator.inspect(hello(80), { peer: "p64", dir: "in", reliable: true });
+  assert.equal(refused.code, "lanes");
+  assert.ok(mediator.violations.includes("lanes"));
+  now = 10000;
+  const again = mediator.inspect(hello(80), { peer: "p64", dir: "in", reliable: true });
+  assert.equal(again.ok, true);
+});
+
 test("despawn frees a live entity slot", () => {
   const mediator = createMediator({
     caps: { maxEntities: 300, spawnPerSecond: 100000, bytesPerSecond: 100000000 },
@@ -130,7 +149,7 @@ function snap(total) {
 
 /** @param {number} id */
 function hello(id) {
-  return encodePacket({ tick: 1 }, [{ type: "hello", playerId: id, proto: 1, hash: "abcd" }]);
+  return encodePacket({ tick: 1 }, [{ type: "hello", playerId: id, proto: 2, hash: "abcd" }]);
 }
 
 function big() {

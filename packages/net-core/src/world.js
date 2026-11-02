@@ -2,7 +2,7 @@
 
 import { createEntity } from "./entity.js";
 
-/** @param {{ canSpawn: (local: boolean) => boolean, canDespawn: () => boolean, onSpawn: (e: any) => void, onDespawn: (e: any) => void, allocId: () => number }} hooks */
+/** @param {{ canSpawn: (local: boolean) => boolean, canDespawn: () => boolean, onSpawn: (e: any) => void, onDespawn: (e: any) => void, allocId: () => number, entityCap: () => number }} hooks */
 export function createWorld(hooks) {
   const ctx = { byId: new Map(), list: [], hooks, nextId: 1, localId: 0 };
   return {
@@ -35,11 +35,20 @@ export function createWorld(hooks) {
 function spawn(ctx, type, init, opts) {
   const local = !!(opts && opts.local);
   if (!ctx.hooks.canSpawn(local)) throw new Error("only the host spawns networked entities");
+  if (!local && networked(ctx) >= ctx.hooks.entityCap())
+    throw new Error("entity cap is " + ctx.hooks.entityCap());
   const id = local ? (ctx.localId -= 1) : ctx.hooks.allocId();
   const entity = createEntity(id, type, init, local);
   add(ctx, entity);
   if (!local) ctx.hooks.onSpawn(entity);
   return entity;
+}
+
+/** @param {any} ctx */
+function networked(ctx) {
+  let n = 0;
+  for (const entity of ctx.list) if (!entity.local) n += 1;
+  return n;
 }
 
 /** @param {any} ctx @param {any} entity */

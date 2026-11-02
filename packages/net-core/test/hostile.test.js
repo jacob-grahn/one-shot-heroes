@@ -102,7 +102,7 @@ test("a joined bye removes that peer and forgets its input", () => {
   const group = setup(game, 2);
   group.atk.send(
     "p0",
-    pkt([{ type: "hello", playerId: 4, proto: 1, hash: manifest().hash }]),
+    pkt([{ type: "hello", playerId: 4, proto: 2, hash: manifest().hash }]),
     true,
   );
   group.run(3);
@@ -165,7 +165,7 @@ test("36 client events do not crash the host and strings stay user content", () 
   group.sessions[1].net.on("zzz", (payload) => got.push(payload));
   group.atk.send(
     "p0",
-    pkt([{ type: "hello", playerId: 4, proto: 1, hash: manifest().hash }]),
+    pkt([{ type: "hello", playerId: 4, proto: 2, hash: manifest().hash }]),
     true,
   );
   group.run(4);
@@ -191,7 +191,7 @@ test("undeclared or non-relay events do not fan out", () => {
   group.sessions[1].net.on("local", (payload) => got.push(payload));
   group.atk.send(
     "p0",
-    pkt([{ type: "hello", playerId: 4, proto: 1, hash: manifest().hash }]),
+    pkt([{ type: "hello", playerId: 4, proto: 2, hash: manifest().hash }]),
     true,
   );
   group.run(3);
@@ -215,7 +215,7 @@ test("a forged event id cannot block the host", () => {
   group.sessions[1].net.on("chat", (payload) => got.push(payload.msg.text || payload.msg));
   group.atk.send(
     "p0",
-    pkt([{ type: "hello", playerId: 4, proto: 1, hash: manifest().hash }]),
+    pkt([{ type: "hello", playerId: 4, proto: 2, hash: manifest().hash }]),
     true,
   );
   group.run(3);
@@ -270,7 +270,7 @@ test("a NaN focus hint is ignored", () => {
   });
   const group = setup(mover(), 2, spec);
   assert.throws(() => group.sessions[1].net.setFocusHint(NaN, Infinity), /finite/);
-  group.atk.send("p0", pkt([{ type: "hello", playerId: 4, proto: 1, hash: spec.hash }]), true);
+  group.atk.send("p0", pkt([{ type: "hello", playerId: 4, proto: 2, hash: spec.hash }]), true);
   group.run(3);
   const pawn = group.host.world.spawn("pawn", { x: 0, y: 0, custom: { owner: 4 } });
   group.host.world.spawn("far", { x: 700, y: 0 });
@@ -312,7 +312,7 @@ test("an oversize event is dropped and does not throw", () => {
   assert.equal(verdict.ok, false);
   group.atk.send(
     "p0",
-    pkt([{ type: "hello", playerId: 4, proto: 1, hash: manifest().hash }]),
+    pkt([{ type: "hello", playerId: 4, proto: 2, hash: manifest().hash }]),
     true,
   );
   group.run(3);

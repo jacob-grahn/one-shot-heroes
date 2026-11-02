@@ -4,12 +4,15 @@ import { createNetwork } from "@osh/net-sim";
 const N = 8;
 const E = 500;
 const TICKS = 100;
+const TAG = "x".repeat(140);
 const manifest = defineManifest({
   maxPlayers: N,
+  maxEntities: E,
   focus: "none",
   tickHz: 20,
   budget: 1200,
   starvationK: 8,
+  custom: { tag: { type: "string", max: 160 } },
 });
 
 function bench() {
@@ -76,7 +79,12 @@ function bench() {
 const game = {
   init(world, net) {
     if (!net.isHost) return;
-    for (let i = 0; i < E; i++) world.spawn("mob", { x: (i % 25) * 3, y: Math.floor(i / 25) * 3 });
+    const plain = plainRequested();
+    for (let i = 0; i < E; i++) {
+      const init = { x: (i % 25) * 3, y: Math.floor(i / 25) * 3 };
+      if (!plain) init.custom = { tag: TAG };
+      world.spawn("mob", init);
+    }
   },
   update(_dt, _inputs, world) {
     let n = 0;
@@ -88,7 +96,12 @@ const game = {
   render() {},
 };
 
-const env = /** @type {{ env?: { NET_BENCH?: string } }} */ (
+const env = /** @type {{ env?: { NET_BENCH?: string, NET_BENCH_PLAIN?: string } }} */ (
   /** @type {any} */ (globalThis).process
 );
+
+function plainRequested() {
+  return !!(env && env.env && env.env.NET_BENCH_PLAIN === "1");
+}
+
 if (env && env.env && env.env.NET_BENCH === "1") bench();

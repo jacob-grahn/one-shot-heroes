@@ -33,7 +33,14 @@ test("mediator in front of an 8-player 400-entity session survives loss and chur
   const dropped = [];
   /** @type {any} */
   let host = null;
-  const net = createNetwork({ seed: 1, loss: 0.05, latency: 20 });
+  const net = createNetwork({
+    seed: 1,
+    loss: 0.05,
+    latency: 20,
+    jitter: 15,
+    reorder: 0.3,
+    reorderMs: 30,
+  });
   const mediator = createMediator({
     now: () => clock,
     onDisconnect(peer, code) {
@@ -59,10 +66,10 @@ test("mediator in front of an 8-player 400-entity session survives loss and chur
   host = sessions[0];
   for (let t = 0; t < 40; t++) round(sessions, net, () => (clock += 50));
   churn = true;
-  for (let t = 0; t < 30; t++) round(sessions, net, () => (clock += 50));
+  for (let t = 0; t < 45; t++) round(sessions, net, () => (clock += 50));
   churn = false;
   move = false;
-  for (let t = 0; t < 100; t++) round(sessions, net, () => (clock += 50));
+  for (let t = 0; t < 300; t++) round(sessions, net, () => (clock += 50));
   assert.equal(
     sessions.slice(1).every((session) => session.joined),
     true,

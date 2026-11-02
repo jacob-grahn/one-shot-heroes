@@ -69,7 +69,7 @@ function pkt(messages) {
 
 /** @param {any} group @param {number} id @param {any} [ep] */
 function join(group, id, ep = group.atk) {
-  ep.send("p0", pkt([{ type: "hello", playerId: id, proto: 1, hash: group.spec.hash }]), true);
+  ep.send("p0", pkt([{ type: "hello", playerId: id, proto: 2, hash: group.spec.hash }]), true);
   group.run(3);
 }
 
@@ -121,7 +121,7 @@ test("custom data over 1024 bytes is rejected at the assignment", () => {
   assert.equal(group.host.ended, false);
 });
 
-test("ids past 65535 are delivered and then reused after ack", () => {
+test("ids past 65535 are delivered and are not reused", () => {
   let burst = 0;
   const game = {
     init() {},
@@ -145,6 +145,8 @@ test("ids past 65535 are delivered and then reused after ack", () => {
   assert.equal(client.length, 1);
   assert.equal(client[0].id, host[0].id);
   assert.ok(host[0].id > 65535);
+  const next = group.host.world.spawn("live", { x: 1 });
+  assert.equal(next.id, host[0].id + 1);
 });
 
 test("relayed events are charged to the sender", () => {
@@ -219,6 +221,98 @@ test("inputs survive a round trip longer than the redundancy window", () => {
   assert.equal(bag.has(60), true);
   assert.equal(bag.has(104), true);
   assert.equal(bag.has(105), false);
+});
+
+test("dropPeer forgets the mediator lane so a later peer can join", () => {
+  const spec = defineManifest({ maxPlayers: 8 });
+  const net = createNetwork({ seed: 4, latency: 0 });
+  const mediator = createMediator({ now: () => 0 });
+  const host = createSession({
+    manifest: spec,
+    game: quiet,
+    transport: mediator.wrap(net.endpoint("p0")),
+    playerId: 0,
+    peerId: "p0",
+    isHost: true,
+  });
+  const client = createSession({
+    manifest: spec,
+    game: quiet,
+    transport: net.endpoint("p1"),
+    playerId: 1,
+    peerId: "p1",
+    isHost: false,
+    hostPeerId: "p0",
+  });
+  for (let t = 0; t < 8; t++) {
+    host.step();
+    client.step();
+    net.advance(20);
+  }
+  assert.equal(client.joined, true);
+  for (let i = 0; i < 63; i++) {
+    const result = mediator.inspect(
+      encodePacket({ tick: 1, flags: 1 }, [{ type: "hello", playerId: i + 2, proto: 2, hash: "abcd" }]),
+      { peer: "x" + i, dir: "in", reliable: true },
+    );
+    assert.equal(result.ok, true);
+  }
+  const blocked = mediator.inspect(
+    encodePacket({ tick: 1, flags: 1 }, [{ type: "hello", playerId: 200, proto: 2, hash: "abcd" }]),
+    { peer: "extra", dir: "in", reliable: true },
+  );
+  assert.equal(blocked.code, "lanes");
+  host.dropPeer("p1");
+  const opened = mediator.inspect(
+    encodePacket({ tick: 1, flags: 1 }, [{ type: "hello", playerId: 200, proto: 2, hash: "abcd" }]),
+    { peer: "extra", dir: "in", reliable: true },
+  );
+  assert.equal(opened.ok, true);
+});
+
+test("spawn refuses entity 401 instead of disconnecting clients", () => {
+  const spec = defineManifest({ maxPlayers: 2, maxEntities: 2 });
+  const net = createNetwork({ seed: 5, latency: 0 });
+  const host = createSession({
+    manifest: spec,
+    game: quiet,
+    transport: net.endpoint("h"),
+    playerId: 0,
+    peerId: "h",
+    isHost: true,
+  });
+  const client = createSession({
+    manifest: spec,
+    game: quiet,
+    transport: net.endpoint("c"),
+    playerId: 1,
+    peerId: "c",
+    isHost: false,
+    hostPeerId: "h",
+  });
+  for (let t = 0; t < 6; t++) {
+    host.step();
+    client.step();
+    net.advance(20);
+  }
+  host.world.spawn("a", {});
+  host.world.spawn("b", {});
+  assert.throws(() => host.world.spawn("c", {}), /entity cap is 2/);
+  assert.doesNotThrow(() => host.step());
+  assert.equal(host.ended, false);
+  assert.equal(client.ended, false);
+  assert.equal(host.world.query().length, 2);
+});
+
+test("an oversize nested custom edit does not abort the host step", () => {
+  const group = setup();
+  const blob = group.host.world.spawn("blob", { custom: { inv: [1] } });
+  group.run(2);
+  const tick = group.host.tick;
+  blob.custom.inv.push("y".repeat(2000));
+  assert.doesNotThrow(() => group.host.step());
+  assert.ok(group.host.tick > tick);
+  assert.equal(blob.custom.inv.length, 1);
 });
 
 test("the host picks a random seed when the page does not", () => {

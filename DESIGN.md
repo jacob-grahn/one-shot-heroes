@@ -36,7 +36,7 @@ net.setFocusHint(x, y); // client hint, focus mode "avatar"
 
 `createSession({ manifest, game, transport, playerId, peerId, isHost, hostPeerId })` is the wrapper. The host calls `step()` once per sim tick. Clients call `step()` to send inputs and take in packets. `render(draw)` builds the frozen view.
 
-Only the host runs `update`. Only the host spawns networked entities and assigns their ids (uint16, starting at 1, never reused). A client may spawn `{ local: true }` particles; those are never synced. Ids below 0 are local.
+Only the host runs `update`. Only the host spawns networked entities and assigns their ids (uint32, starting at 1, never reused). A client may spawn `{ local: true }` particles; those are never synced. Ids below 0 are local.
 
 ## Defaults Jacob can change
 
@@ -100,11 +100,11 @@ Topology is a star. Clients talk only to the host. The wrapper tells a client th
 
 Reliable messages: handshake (`protocol` + game hash), spawn, despawn, `net.emit` events, the late-join snapshot, welcome/reject/bye. Unreliable: entity state, inputs, focus hints. Inputs repeat the last few ticks. The host applies a tick's input once, after checking it against the manifest. A bad sample is dropped. The host keeps samples in `[tick - max(inputRedundancy, tickHz * 2), tick + 4]`, so a round trip longer than the repeated history still applies, up to about two seconds. A sample older than that is dropped.
 
-The handshake compares `manifest.hash` (FNV-1a of the canonical manifest) and protocol version 1. A mismatch rejects the peer. If the host leaves, clients end with `host_left`.
+The handshake compares `manifest.hash` (FNV-1a of the canonical manifest) and protocol version 2. A mismatch rejects the peer. If the host leaves, clients end with `host_left`.
 
 ## Change tracking and deltas
 
-At the end of a host tick each entity is snapshotted once (a plain copy, not a Proxy — a Proxy misses `custom.hp = 1`). That snapshot is diffed per recipient against the last state that recipient acknowledged.
+At the end of a host tick each entity is snapshotted once (a plain copy, not a Proxy — a Proxy misses `custom.hp = 1`). The unreliable patch is diffed against that peer's spawn or late-join snapshot (version 0), so every delta is a full description since spawn. The host sends it until the peer acknowledges that description. An empty patch is sent when the entity has returned to the spawn pose, so a lost "back to baseline" packet is retried instead of going quiet.
 
 Each recipient has its own baseline, version counter, and Gaffer accumulator:
 
@@ -112,7 +112,7 @@ Each recipient has its own baseline, version counter, and Gaffer accumulator:
 acc += basePriority * relevance * dt
 ```
 
-`basePriority` comes from `manifest.types[type].priority` (default 1). Sending an entity resets its accumulator to 0. Packets are filled up to the byte budget, highest accumulator first, not up to a fixed item count. One voluntary packet is sent per recipient per tick. If a dirty entity is still unsent and its age is at least K ticks, extra packets go out the same tick until it has been sent. Resends use the same K bound so a lost packet is retried. No single packet exceeds the budget. Custom data over 1024 bytes throws `custom data exceeds 1024 bytes` at the assignment (`entity.custom = …` or a property set on that object) and at `world.spawn`, before the value is stored. Send paths do not throw: a record that cannot fit is skipped, counted on `stats.reliableDrops`, and, when it is a reliable message already queued, that peer is disconnected.
+`basePriority` comes from `manifest.types[type].priority` (default 1). Sending an entity resets its accumulator to 0. Packets are filled up to the byte budget, highest accumulator first, not up to a fixed item count. One voluntary packet is sent per recipient per tick. If a dirty entity is still unsent and its age is at least K ticks, extra packets go out the same tick until it has been sent. Resends use the same K bound so a lost packet is retried. No single packet exceeds the budget. Custom data over 1024 bytes throws `custom data exceeds 1024 bytes` at the assignment (`entity.custom = …` or a property set on that object) and at `world.spawn`, before the value is stored. A nested edit that slips past that check is reverted from the last snapshot that fit, and the host step still sends and advances. The byte size is measured only when that snapshot changes, and empty custom is skipped. Send paths do not throw: a single reliable message that cannot fit is counted on `stats.reliableDrops` and that peer is disconnected. Snapshot records that do not fit in the current datagram are carried in the next snapshot packet.
 
 Relevance:
 
@@ -122,7 +122,7 @@ Relevance:
 
 `game` and `avatar` use a spatial grid. Relevance is `1 / (1 + chebyshev cell distance)`. It is never zero, and K forces a send anyway, so a far dirty entity cannot starve.
 
-Deltas are absolute field values, not additive, so a duplicate or a reorder is harmless: a client applies an update only onto the baseline version the packet names, and only if the new version is newer. Defaults (`x = 0`, `y = 0`, `rotation = 0`, `scale = 1`, `anim = 0`, `animStart = 0`, empty custom) are omitted. They are the baseline for a spawn and for a late join. The late-join snapshot is the full set of non-default values, chunked so each datagram still fits the budget. A client that receives it gets exactly the host's current networked state, not the history of events.
+Deltas are absolute field values, not additive. A client applies an update only onto the baseline version the packet names, and only if the new version is newer, so a duplicate or a reorder cannot stick a stale field. Defaults (`x = 0`, `y = 0`, `rotation = 0`, `scale = 1`, `anim = 0`, `animStart = 0`, empty custom) are omitted from the spawn baseline. The late-join snapshot is the full set of non-default values, chunked so each datagram still fits the budget. A client that receives it gets exactly the host's current networked state, not the history of events. Records that do not fit are carried in the next snapshot packet.
 
 Acks use a sequence number plus a 32-packet bit window, carried on every packet. State sequence 0 is reserved.
 
@@ -154,13 +154,15 @@ const mediator = createMediator({
 });
 ```
 
-`host.dropPeer` removes that peer and frees ids once every remaining peer has acked their despawn. Unreliable traffic over the cap is dropped and resent by the normal ack loop. A lane is created for a peer id the first time it is seen, including an id that has not sent `hello`. The map is capped at 64; the oldest lane that is not in the joined set is evicted. `inspect(bytes)` is the same check. The walk also rejects event names longer than `maxName` and event payloads over `maxEventBytes`.
+`host.dropPeer` removes that peer. It also calls `transport.forget(peerId)` when the wrapped transport provides it, and `close` sends `bye` (from a client as well as the host) so the mediator drops that peer from `joined` and deletes its lane. A lane with no traffic for 10 seconds is evicted even if the peer had joined. When every lane is still in use, a new peer id is refused and the violation `lanes` is recorded. Fan-out for relayed events counts only peers still in `joined`. Unreliable traffic over the cap is dropped and resent by the normal ack loop. `inspect(bytes)` is the same check. The walk also rejects event names longer than `maxName` and event payloads over `maxEventBytes`.
+
+Protocol version is 2.
 
 `@osh/net-core/src/wire.js` is the only module that imports `@osh/net-wire`. The codec would otherwise be imported from enough call sites to trip the fan-in gate. The file is a barrel on purpose.
 
 Peer events are delivered only when the name is in the manifest and the payload matches. They are relayed to other peers only when that event sets `relay: true`. Event strings decode as `{ text, userContent: true }`. Each join gets an epoch. The dedupe key is origin plus epoch plus id, a sliding window of 64, and a new epoch resets that window on the host and on every client. The host replaces `origin` with the joined player's id.
 
-Entity ids are `u32` on the wire. The host reuses an id only after every peer that was sent the despawn has acked it, or at the end of the step if the spawn never left the queue. Clients drop the tombstone when a later spawn reuses the id.
+Entity ids are a `u32` counter that is never reused. A despawn does not hand that id to a later spawn, so a packet still in flight cannot be applied to the wrong entity. `world.spawn` throws `entity cap is N` at the manifest's `maxEntities` (default 400) before the entity exists.
 
 A client resends hello until it is welcomed or rejected. If the page does not pass `seed`, the host draws one with `crypto.getRandomValues` and sends it in the welcome, so `net.random` is not the same sequence in every session.
 

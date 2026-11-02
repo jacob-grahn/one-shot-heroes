@@ -152,6 +152,24 @@ test("a late joiner gets exactly the full state", () => {
   assert.equal(group.clients[0].digest(), group.host.digest());
 });
 
+test("a snapshot that does not fit one packet still delivers every record", () => {
+  const manifest = defineManifest({ budget: 80, maxPlayers: 4 });
+  const game = {
+    init(world, net) {
+      if (!net.isHost) return;
+      for (let i = 0; i < 6; i++) world.spawn("box", { x: i * 3, y: i });
+    },
+    update() {},
+    render() {},
+  };
+  const group = party({ manifest, game, n: 2, seed: 1 });
+  connect(group, dt);
+  const reliable = group.host.stats.sends.filter((packet) => packet.reliable);
+  assert.ok(reliable.length > 1);
+  assert.equal(group.host.stats.reliableDrops, 0);
+  assert.equal(group.clients[0].digest(), group.host.digest());
+});
+
 test("spawn and despawn survive loss", () => {
   let mode = "hold";
   const manifest = boxManifest();
@@ -241,7 +259,7 @@ test("invalid inputs never reach update", () => {
   const raw = net.endpoint("c");
   raw.send(
     "h",
-    encodePacket({ tick: 0 }, [{ type: "hello", playerId: 1, proto: 1, hash: manifest.hash }]),
+    encodePacket({ tick: 0 }, [{ type: "hello", playerId: 1, proto: 2, hash: manifest.hash }]),
     true,
   );
   for (let i = 0; i < 5; i++) {

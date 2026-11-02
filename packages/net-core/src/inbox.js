@@ -23,23 +23,36 @@ function dispatch(s, item) {
     if (!hello.length) return;
     packet.messages = hello;
   }
-  note(s, item.from, packet);
+  const peer = s.isHost ? s.peers.get(item.from) : s.link;
+  if (peer) confirmSent(peer, packet.ack, packet.ackBits);
+  if (!s.isHost) noteTick(s, packet.tick);
+  const ready = stateReady(s, packet);
   for (const message of packet.messages) handle(s, message, item.from, packet.tick);
+  if (peer && ready) noteRecv(peer, packet.seq);
+}
+
+/** A state delta whose baseline is missing must not be acked, or the host stops resending it. */
+function stateReady(s, packet) {
+  for (const message of packet.messages) {
+    if (message.type !== "state") continue;
+    for (const rec of message.records) if (!recordReady(s, rec)) return false;
+  }
+  return true;
+}
+
+/** @param {any} s @param {any} rec */
+function recordReady(s, rec) {
+  if (s.tomb.has(rec.id)) return true;
+  const versions = s.versions.get(rec.id);
+  if (!versions) return true;
+  if (versions.has(rec.baseVersion)) return true;
+  return (s.shown.get(rec.id) ?? -1) >= rec.version;
 }
 
 /** Host takes hello from strangers. Clients take traffic only from the host. */
 function fromPeer(s, from) {
   if (s.isHost) return s.peers.has(from);
   return from === s.hostPeerId;
-}
-
-/** @param {any} s @param {string} from @param {any} packet */
-function note(s, from, packet) {
-  const peer = s.isHost ? s.peers.get(from) : s.link;
-  if (!peer) return;
-  noteRecv(peer, packet.seq);
-  confirmSent(peer, packet.ack, packet.ackBits);
-  if (!s.isHost) noteTick(s, packet.tick);
 }
 
 /** @param {any} s @param {number} tick */

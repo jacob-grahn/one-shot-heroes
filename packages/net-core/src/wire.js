@@ -10,6 +10,7 @@ export {
   checkRecord,
   cloneState,
   createSink,
+  customEqual,
   customOps,
   decodePacket,
   defaultState,

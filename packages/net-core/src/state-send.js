@@ -2,6 +2,7 @@
 
 import { ackHeader, nextSeq, rememberSent } from "./ack.js";
 import { avatarFocus, relevance } from "./focus.js";
+import { acceptCustom as checkCustom } from "./entity.js";
 import { emit } from "./relay.js";
 import { planPackets } from "./select.js";
 import {
@@ -13,6 +14,7 @@ import {
   diffMask,
   encodeOps,
   fillQuant,
+  sameState,
   updateBytes,
   writeUpdate,
 } from "./wire.js";
@@ -36,7 +38,14 @@ function fillOne(s, entity, quant) {
     slot = { custom: EMPTY };
     s.slots.set(entity.id, slot);
   }
+  const prev = slot.custom;
   fillQuant(slot, entity, quant);
+  const verdict = checkCustom(entity, slot.custom, prev);
+  if (verdict === "same" || verdict === "empty") slot.custom = prev;
+  if (verdict === "reverted") {
+    fillQuant(slot, entity, quant);
+    s.stats.customReverted += 1;
+  }
 }
 
 /** @param {any} s @param {any} peer */
@@ -66,23 +75,32 @@ function collect(s, peer) {
 function consider(s, peer, entity) {
   if (entity.local) return null;
   const cur = s.slots.get(entity.id);
-  const conf = peer.confirmed.get(entity.id);
-  if (!cur || !conf) return null;
-  const mask = diffMask(cur, conf.q);
-  if (!mask) {
-    peer.dirtyAt.delete(entity.id);
+  const acked = peer.confirmed.get(entity.id);
+  if (!cur || !acked || sameState(cur, acked.q)) {
+    if (acked) peer.dirtyAt.delete(entity.id);
     return null;
   }
+  return dirtyItem(s, peer, entity, cur);
+}
+
+/** Patch against the spawn snapshot so a lost intermediate update cannot stick. */
+function patchBase(peer, entity, acked) {
+  const spawn = peer.spawnQ && peer.spawnQ.get(entity.id);
+  return spawn ? { version: 0, q: spawn } : acked;
+}
+
+/** An empty mask is still a send: the entity returned to the spawn pose and the client must hear it. */
+function dirtyItem(s, peer, entity, cur) {
+  const base = patchBase(peer, entity, peer.confirmed.get(entity.id));
   if (!peer.dirtyAt.has(entity.id)) peer.dirtyAt.set(entity.id, s.tick);
-  const customLen = mask & 64 ? customSize(cur, conf.q) : 0;
-  if (updateBytes(mask, customLen) + 20 > s.manifest.budget) {
+  const mask = diffMask(cur, base.q);
+  const customLen = mask & 64 ? customSize(cur, base.q) : 0;
+  const size = updateBytes(mask, customLen);
+  if (size + 20 > s.manifest.budget) {
     s.stats.skipped += 1;
     return null;
   }
-  return itemOf(entity, cur, conf, {
-    age: s.tick - peer.dirtyAt.get(entity.id),
-    size: updateBytes(mask, customLen),
-  });
+  return itemOf(entity, cur, base, { age: s.tick - peer.dirtyAt.get(entity.id), size });
 }
 
 /** @param {any} entity @param {any} cur @param {any} conf @param {{ age: number, size: number }} meta */

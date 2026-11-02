@@ -1,6 +1,6 @@
 /** Plain entity records. Nested custom data is read by snapshotting, not by a Proxy. */
 
-import { isUserText, plainClone, valueBytes } from "./wire.js";
+import { EMPTY, customEqual, isUserText, plainClone, valueBytes } from "./wire.js";
 
 const BAD = new Set(["__proto__", "constructor", "prototype"]);
 const CAP = 1024;
@@ -27,15 +27,27 @@ export function createEntity(id, type, init, local) {
   return entity;
 }
 
-/** Revert an in-place edit that grew past the cap. Send paths never see it. */
-export function recheckCustom(entity) {
-  if (!entity || entity.local) return;
-  if (valueBytes(entity.custom) <= CAP) {
-    lastGood.set(entity, storeCustom(entity.custom));
-    return;
+/**
+ * Check a refreshSlots snapshot. Empty and unchanged customs are not measured.
+ * The snapshot object is kept as the last good copy. Oversize reverts in place.
+ * @param {any} entity @param {any} snap @param {any} prev
+ * @returns {"skip" | "empty" | "same" | "ok" | "reverted"}
+ */
+export function acceptCustom(entity, snap, prev) {
+  if (!entity || entity.local) return "skip";
+  if (!snap || snap === EMPTY || emptyCustom(snap)) return "empty";
+  if (prev && prev !== EMPTY && customEqual(snap, prev)) return "same";
+  if (valueBytes(snap) <= CAP) {
+    lastGood.set(entity, snap);
+    return "ok";
   }
   entity.custom = lastGood.get(entity) || {};
-  throw new Error("custom data exceeds 1024 bytes");
+  return "reverted";
+}
+
+/** @param {any} snap */
+function emptyCustom(snap) {
+  return !Object.keys(snap).length;
 }
 
 /** @param {any} entity @param {Record<string, unknown>} initial @param {boolean} local */

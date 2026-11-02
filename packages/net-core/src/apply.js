@@ -48,11 +48,17 @@ export function applyUpdate(s, rec, tick) {
   const versions = s.versions.get(rec.id);
   if (!versions) return hold(s, rec, tick);
   const base = versions.get(rec.baseVersion);
-  if (!base) return;
+  if (!base) {
+    const oldest = Math.min(...versions.keys());
+    if (rec.baseVersion < oldest) return;
+    if ((s.shown.get(rec.id) ?? -1) >= rec.version) return;
+    return hold(s, rec, tick);
+  }
   const next = applyState(base, rec.patch);
   versions.set(rec.version, cloneState(next));
   prune(versions, rec.baseVersion);
   show(s, rec, next, tick);
+  if (!s.flushing) flushPending(s, rec.id, tick);
 }
 
 /** @param {any} s @param {any} rec @param {any} next @param {number} tick */
@@ -66,16 +72,20 @@ function show(s, rec, next, tick) {
   pushSample(s, entity, tick);
 }
 
-/** @param {Map<number, any>} versions @param {number} baseVersion */
+/** Keep the named baseline and the newest state. Later patches name that baseline. */
 function prune(versions, baseVersion) {
+  let newest = baseVersion;
+  for (const version of versions.keys()) if (version > newest) newest = version;
   for (const version of [...versions.keys()]) {
-    if (version < baseVersion) versions.delete(version);
+    if (version !== baseVersion && version !== newest) versions.delete(version);
   }
 }
 
 /** @param {any} s @param {any} rec @param {number} tick */
 function hold(s, rec, tick) {
   const list = s.pending.get(rec.id) || [];
+  if (list.some((item) => item.rec.version === rec.version)) return;
+  if (list.length >= 8) list.shift();
   list.push({ rec, tick });
   s.pending.set(rec.id, list);
 }
@@ -83,10 +93,22 @@ function hold(s, rec, tick) {
 /** @param {any} s @param {number} id @param {number} tick */
 function flushPending(s, id, tick) {
   const list = s.pending.get(id);
-  if (!list) return;
+  if (!list || !list.length) {
+    s.flushSig = "";
+    return;
+  }
+  const sig = id + ":" + list.map((item) => item.rec.version).join(",");
+  if (s.flushSig === sig) {
+    s.flushSig = "";
+    return;
+  }
+  s.flushSig = sig;
   s.pending.delete(id);
+  s.flushing = true;
   list.sort((a, b) => a.rec.version - b.rec.version);
   for (const item of list) applyUpdate(s, item.rec, item.tick ?? tick);
+  s.flushing = false;
+  flushPending(s, id, tick);
 }
 
 /** @param {any} s @param {number} id */

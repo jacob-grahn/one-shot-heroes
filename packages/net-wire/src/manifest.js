@@ -39,6 +39,7 @@ function manifestBody(src, focus) {
     cell: optNum(src.cell, LIMITS.cell),
     focusClamp: optNum(src.focusClamp, LIMITS.focusClamp),
     inputRedundancy: optInt(src.inputRedundancy, 1, 16, LIMITS.inputRedundancy),
+    maxEntities: optInt(src.maxEntities, 1, 100000, 400),
     avatarType: src.avatarType || "",
     avatarOwnerKey: ownerKey(src.avatarOwnerKey),
     quant: normQuant(src.quant),

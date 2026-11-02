@@ -19,7 +19,6 @@ import {
 import { refreshSlots, sendDirty } from "./state-send.js";
 import { mulberry32 } from "./rng.js";
 import { PROTOCOL, canon, decodePacket, defineManifest, quantize } from "./wire.js";
-import { recheckCustom } from "./entity.js";
 import { createWorld } from "./world.js";
 
 /** @param {Record<string, any>} options */
@@ -98,10 +97,7 @@ function blank(options) {
 
 /** @param {any} s */
 function initIds(s) {
-  s.freeIds = [];
   s.nextNetId = 1;
-  s.grave = new Map();
-  s.unsentFree = [];
   s.epochs = new Map();
   s.nextEpoch = 0;
 }
@@ -113,6 +109,7 @@ function freshStats() {
     maxPacket: 0,
     reliableDrops: 0,
     skipped: 0,
+    customReverted: 0,
     sends: [],
     phases: { diff: 0, grid: 0, priority: 0, encode: 0, alloc: 0, other: 0 },
   };
@@ -140,7 +137,8 @@ function hooks(s) {
   return {
     canSpawn: (local) => local || s.isHost,
     canDespawn: () => s.isHost,
-    allocId: () => (s.freeIds.length ? s.freeIds.pop() : s.nextNetId++),
+    allocId: () => s.nextNetId++,
+    entityCap: () => s.manifest.maxEntities,
     onSpawn: (entity) => {
       if (s.isHost) trackSpawn(s, entity);
     },
@@ -148,12 +146,6 @@ function hooks(s) {
       if (s.isHost) trackDespawn(s, entity);
     },
   };
-}
-
-/** Ids that never left the host become reusable after this step's spawns. */
-function releaseUnsent(s) {
-  for (const id of s.unsentFree) s.freeIds.push(id);
-  s.unsentFree.length = 0;
 }
 
 function freshSeed() {
@@ -190,13 +182,13 @@ function leave(s, peerId) {
   s.focus.delete(peer.playerId);
   s.seen.delete(peer.playerId);
   s.epochs.delete(peer.playerId);
-  for (const [id, wait] of s.grave) {
-    wait.delete(peerId);
-    if (wait.size) continue;
-    s.grave.delete(id);
-    s.freeIds.push(id);
-  }
+  forget(s, peerId);
   announce(s);
+}
+
+/** @param {any} s @param {string} peerId */
+function forget(s, peerId) {
+  if (s.transport && typeof s.transport.forget === "function") s.transport.forget(peerId);
 }
 
 /** @param {any} s */
@@ -260,7 +252,9 @@ function stepHost(s) {
   s.inUpdate = true;
   try {
     s.game.update(1 / s.manifest.tickHz, inputsFor(s), s.world, s.net);
-    for (const entity of s.world.live()) recheckCustom(entity);
+  } catch (err) {
+    if (!customCap(err)) throw err;
+    s.stats.customReverted += 1;
   } finally {
     s.inUpdate = false;
   }
@@ -269,7 +263,6 @@ function stepHost(s) {
   refreshSlots(s);
   for (const peer of s.peers.values()) sendPeer(s, peer);
   pruneInputs(s);
-  releaseUnsent(s);
   s.shownTick = s.tick;
   s.tick += 1;
 }
@@ -294,9 +287,19 @@ function stepClient(s) {
 
 /** @param {any} s */
 function close(s) {
-  if (s.isHost && !s.ended) sendBye(s);
+  if (!s.ended) {
+    if (s.isHost) {
+      sendBye(s);
+      for (const peerId of [...s.peers.keys()]) forget(s, peerId);
+    } else sendDirect(s, { type: "bye" });
+  }
   s.ended = true;
   if (!s.reason) s.reason = "close";
+}
+
+/** @param {unknown} err */
+function customCap(err) {
+  return !!(err && String(/** @type {Error} */ (err).message).includes("custom data exceeds 1024"));
 }
 
 /** @param {any} s */

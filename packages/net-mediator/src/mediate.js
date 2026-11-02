@@ -5,6 +5,7 @@ import { CAPS } from "./caps.js";
 import { walk } from "./walk.js";
 
 const MAX_LANES = 64;
+const IDLE_MS = 10000;
 const HOST_AUTH = new Set(["spawn", "despawn", "snap"]);
 
 /** @param {{ caps?: Partial<import("./caps.js").CapTable>, now?: () => number, onDisconnect?: (peer: string, code: string) => void }} [options] */
@@ -43,7 +44,10 @@ function inspect(st, bytes, meta) {
   const packet = decodePacket(bytes);
   if (packet.ok === false)
     return block(st, ctx, packet.error === "bad_key" ? "bad_key" : "malformed");
-  if (!openLane(st, ctx)) return { ok: false, code: "unknown", ignore: true };
+  if (!openLane(st, ctx)) {
+    st.violations.push("lanes");
+    return { ok: false, code: "lanes", logged: true };
+  }
   const side = lane(st, ctx.peer, ctx.dir);
   const draft = {
     entities: st.entities,
@@ -137,10 +141,7 @@ function commit(st, side, draft, ctx) {
   else applySpawns(st, draft);
   if (draft.snapBytes) side.snapBytes = draft.snapBytes;
   if (draft.joins && ctx.dir === "in") st.joined.add(ctx.peer);
-  if (draft.bye) {
-    st.joined.delete(ctx.peer);
-    st.lanes.delete(ctx.peer);
-  }
+  if (draft.bye) forgetPeer(st, ctx.peer);
 }
 
 /** @param {any} st @param {any} draft */
@@ -200,11 +201,22 @@ function addBytes(win, now, n) {
   win.sum += n;
 }
 
-/** Lanes are created on demand and evicted so unknown peer ids cannot grow the map. */
+/** Lanes are created on demand. Idle peers are dropped even if they joined. */
 function openLane(st, ctx) {
+  sweepIdle(st);
   if (st.lanes.has(ctx.peer) || ctx.peer === "*") return true;
   if (st.lanes.size >= MAX_LANES) evictLane(st);
   return st.lanes.size < MAX_LANES;
+}
+
+/** @param {any} st */
+function sweepIdle(st) {
+  const now = st.now();
+  const idle = [];
+  for (const [peer, row] of st.lanes) {
+    if (peer !== "*" && now - row.at >= IDLE_MS) idle.push(peer);
+  }
+  for (const peer of idle) forgetPeer(st, peer);
 }
 
 /** @param {any} st */
@@ -218,7 +230,13 @@ function evictLane(st) {
       oldest = peer;
     }
   }
-  if (oldest) st.lanes.delete(oldest);
+  if (oldest) forgetPeer(st, oldest);
+}
+
+/** @param {any} st @param {string} peer */
+function forgetPeer(st, peer) {
+  st.joined.delete(peer);
+  st.lanes.delete(peer);
 }
 
 /** @param {any} st @param {string} peer @param {string} dir */
@@ -262,6 +280,9 @@ function wrap(st, transport) {
     close() {
       if (transport.close) transport.close();
     },
+    forget(peerId) {
+      forgetPeer(st, String(peerId));
+    },
   };
 }
 
@@ -275,7 +296,7 @@ function forward(st, transport, spec) {
   }
   if (spec.dir === "out" && spec.reliable && st.onDisconnect)
     st.onDisconnect(spec.peer, result.code);
-  st.violations.push(result.code);
+  if (!result.logged) st.violations.push(result.code);
   return false;
 }
 

@@ -1,6 +1,6 @@
 /** Protocol defaults. Jacob can change these; DESIGN.md lists each one. */
 
-export const PROTOCOL = 1;
+export const PROTOCOL = 2;
 export const HEADER_BYTES = 15;
 export const MAX_MESSAGES = 32;
 export const MAX_DEPTH_SAFETY = 8;

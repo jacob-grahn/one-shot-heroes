@@ -27,29 +27,22 @@ export function trackSpawn(s, entity) {
   const cur = cloneState(quantize(entity, s.manifest.quant));
   for (const peer of s.peers.values()) {
     if (!peer.live) continue;
-    peer.confirmed.set(entity.id, { version: 0, q: cloneState(cur) });
+    const q = cloneState(cur);
+    peer.confirmed.set(entity.id, { version: 0, q: cloneState(q) });
     peer.ver.set(entity.id, 0);
+    if (!peer.spawnQ) peer.spawnQ = new Map();
+    peer.spawnQ.set(entity.id, q);
     peer.pendingSpawns.set(entity.id, spawnRecord(s, entity, cur));
   }
 }
 
 /** @param {any} s @param {any} entity */
 export function trackDespawn(s, entity) {
-  let waiting = false;
   for (const peer of s.peers.values()) {
     if (!peer.live) continue;
-    if (dropQueuedSpawn(peer, entity.id)) {
-      clearPeerEntity(s, peer, entity.id);
-      continue;
-    }
-    peer.queue.push({ type: "despawn", id: entity.id });
+    if (!dropQueuedSpawn(peer, entity.id)) peer.queue.push({ type: "despawn", id: entity.id });
     clearPeerEntity(s, peer, entity.id);
-    let grave = s.grave.get(entity.id);
-    if (!grave) s.grave.set(entity.id, (grave = new Set()));
-    grave.add(peer.peerId);
-    waiting = true;
   }
-  if (!waiting) s.unsentFree.push(entity.id);
 }
 
 /** @param {any} peer @param {number} id */
@@ -70,6 +63,7 @@ function flushSpawns(peer) {
 function clearPeerEntity(s, peer, id) {
   peer.confirmed.delete(id);
   peer.ver.delete(id);
+  if (peer.spawnQ) peer.spawnQ.delete(id);
   peer.acc.delete(id);
   peer.dirtyAt.delete(id);
   if (s.slots) s.slots.delete(id);
@@ -87,22 +81,9 @@ function spawnRecord(s, entity, cur) {
   };
 }
 
-/** @param {any} s @param {string} peerId @param {number[]} ids */
-function releaseAcked(s, peerId, ids) {
-  for (const id of ids) {
-    const wait = s.grave.get(id);
-    if (!wait) continue;
-    wait.delete(peerId);
-    if (wait.size) continue;
-    s.grave.delete(id);
-    s.freeIds.push(id);
-  }
-}
-
 /** @param {any} s @param {string} from @param {number} playerId */
 export function acceptPeer(s, from, playerId) {
   const peer = createPeer(from, playerId);
-  peer.noteFree = (ids) => releaseAcked(s, from, ids);
   peer.epoch = s.nextEpoch += 1;
   s.epochs.set(playerId, peer.epoch);
   s.peers.set(from, peer);
@@ -123,8 +104,11 @@ function baseline(s, peer) {
   for (const entity of s.world.query()) {
     if (entity.local) continue;
     const cur = cloneState(quantize(entity, s.manifest.quant));
-    peer.confirmed.set(entity.id, { version: 0, q: cloneState(cur) });
+    const q = cloneState(cur);
+    peer.confirmed.set(entity.id, { version: 0, q: cloneState(q) });
     peer.ver.set(entity.id, 0);
+    if (!peer.spawnQ) peer.spawnQ = new Map();
+    peer.spawnQ.set(entity.id, q);
     records.push(spawnRecord(s, entity, cur));
   }
   return records;
@@ -146,14 +130,13 @@ function snapMessages(s, records) {
   if (!records.length) return [{ type: "snap", index: 0, count: 1, total: 0, records: [] }];
   const fit = (group) => snapSize(s, group, records.length) <= s.manifest.budget;
   const split = takeBatches(records, fit);
-  if (split.overflow.length) s.stats.reliableDrops += split.overflow.length;
-  const batches = split.batches.length ? split.batches : [[]];
-  const included = batches.reduce((sum, group) => sum + group.length, 0);
-  return batches.map((group, index) => ({
+  const batches = split.batches.concat(split.overflow.map((record) => [record]));
+  const chunks = batches.length ? batches : [[]];
+  return chunks.map((group, index) => ({
     type: "snap",
     index,
-    count: batches.length,
-    total: included,
+    count: chunks.length,
+    total: records.length,
     records: group,
   }));
 }
@@ -206,9 +189,7 @@ function fitsReliable(s, group) {
 /** @param {any} s @param {any} peer @param {any[]} batch */
 function sendReliable(s, peer, batch) {
   const seq = nextSeq(peer);
-  const free = [];
-  for (const message of batch) if (message.type === "despawn") free.push(message.id);
-  rememberSent(peer, seq, [], free);
+  rememberSent(peer, seq, []);
   const bytes = encodePacket({ ...head(s, 1), seq, ...ackHeader(peer) }, batch);
   emit(s, peer.peerId, bytes, { reliable: true });
 }
