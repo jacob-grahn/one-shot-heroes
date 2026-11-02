@@ -78,6 +78,58 @@ test("a stranger bye or reject does not end the host", () => {
   );
 });
 
+test("a joined bye removes that peer and forgets its input", () => {
+  const got = [];
+  const game = {
+    init() {},
+    update(_dt, inputs) {
+      got.push(inputs[4] ? inputs[4].dx : null);
+    },
+    render() {},
+  };
+  const group = setup(game, 2);
+  group.atk.send(
+    "p0",
+    pkt([{ type: "hello", playerId: 4, proto: 1, hash: manifest().hash }]),
+    true,
+  );
+  group.run(3);
+  assert.equal(
+    group.host.net.players.some((player) => player.id === 4),
+    true,
+  );
+  group.atk.send(
+    "p0",
+    encodePacket({ tick: 1 }, [
+      { type: "input", samples: [{ tick: group.host.tick, values: { dx: 1 } }] },
+    ]),
+    false,
+  );
+  group.run(2);
+  assert.ok(got.includes(1));
+  group.atk.send("p0", pkt([{ type: "bye" }]), true);
+  group.run(2);
+  assert.equal(group.host.ended, false);
+  assert.equal(group.sessions[1].ended, false);
+  assert.equal(
+    group.host.net.players.some((player) => player.id === 4),
+    false,
+  );
+  const mark = got.length;
+  group.atk.send(
+    "p0",
+    encodePacket({ tick: 1 }, [
+      { type: "input", samples: [{ tick: group.host.tick, values: { dx: 1 } }] },
+    ]),
+    false,
+  );
+  group.run(2);
+  assert.equal(
+    got.slice(mark).every((dx) => dx == null),
+    true,
+  );
+});
+
 test("33 spawns in one tick reach the client", () => {
   let burst = 0;
   const game = {
