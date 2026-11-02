@@ -18,6 +18,7 @@ export {
   diffMask,
   encodeOps,
   encodePacket,
+  fillPose,
   fillQuant,
   isUserText,
   materialize,

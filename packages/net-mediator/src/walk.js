@@ -18,6 +18,7 @@ export function walk(caps, draft, packet, size) {
 /** @param {any} caps @param {any} draft @param {any} message @param {number} size */
 function one(caps, draft, message, size) {
   if (message.type === "hello") return hello(draft);
+  if (message.type === "welcome") return welcome(draft);
   if (message.type === "spawn") return spawn(caps, draft, message.record);
   if (message.type === "despawn") return despawn(draft, message);
   if (message.type === "bye") return bye(draft);
@@ -40,6 +41,12 @@ function eventCap(caps, draft, message) {
 /** @param {any} draft */
 function hello(draft) {
   draft.joins += 1;
+  return "";
+}
+
+/** @param {any} draft */
+function welcome(draft) {
+  draft.welcome = true;
   return "";
 }
 

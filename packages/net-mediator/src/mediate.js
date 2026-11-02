@@ -6,13 +6,14 @@ import { walk } from "./walk.js";
 
 const MAX_LANES = 64;
 const IDLE_MS = 10000;
+const PENDING_MS = 1500;
 const HOST_AUTH = new Set(["spawn", "despawn", "snap"]);
 
-/** @param {{ caps?: Partial<import("./caps.js").CapTable>, now?: () => number, onDisconnect?: (peer: string, code: string) => void }} [options] */
+/** @param {{ caps?: Partial<import("./caps.js").CapTable>, manifest?: { maxEntities?: number }, now?: () => number, onDisconnect?: (peer: string, code: string) => void }} [options] */
 export function createMediator(options) {
   const opts = options || {};
   const st = {
-    caps: { ...CAPS, ...(opts.caps || {}) },
+    caps: resolveCaps(opts),
     now: opts.now || (() => Date.now()),
     onDisconnect: opts.onDisconnect || null,
     violations: [],
@@ -140,7 +141,7 @@ function commit(st, side, draft, ctx) {
   if (draft.snapEntities != null) applySnap(st, draft);
   else applySpawns(st, draft);
   if (draft.snapBytes) side.snapBytes = draft.snapBytes;
-  if (draft.joins && ctx.dir === "in") st.joined.add(ctx.peer);
+  if (draft.welcome && ctx.dir === "out") st.joined.add(ctx.peer);
   if (draft.bye) forgetPeer(st, ctx.peer);
 }
 
@@ -209,22 +210,39 @@ function openLane(st, ctx) {
   return st.lanes.size < MAX_LANES;
 }
 
-/** @param {any} st */
+/** Joined peers last 10s. A hello the host has not accepted lasts about 1.5s. */
 function sweepIdle(st) {
   const now = st.now();
   const idle = [];
   for (const [peer, row] of st.lanes) {
-    if (peer !== "*" && now - row.at >= IDLE_MS) idle.push(peer);
+    if (peer !== "*" && now - row.at >= idleLimit(st, peer)) idle.push(peer);
   }
   for (const peer of idle) forgetPeer(st, peer);
 }
 
-/** @param {any} st */
+/** @param {any} st @param {string} peer */
+function idleLimit(st, peer) {
+  return st.joined.has(peer) ? IDLE_MS : PENDING_MS;
+}
+
+/** @param {{ caps?: Partial<import("./caps.js").CapTable>, manifest?: { maxEntities?: number } }} opts */
+function resolveCaps(opts) {
+  const caps = { ...CAPS, ...(opts.caps || {}) };
+  const fromManifest = opts.manifest && opts.manifest.maxEntities;
+  if (fromManifest == null) return caps;
+  if (opts.caps && opts.caps.maxEntities != null && opts.caps.maxEntities !== fromManifest)
+    throw new Error("mediator maxEntities does not match the manifest");
+  caps.maxEntities = fromManifest;
+  return caps;
+}
+
+/** Drop the oldest pending lane whose hello grace has ended. Joined peers stay. */
 function evictLane(st) {
+  const now = st.now();
   let oldest = "";
   let at = Infinity;
   for (const [peer, row] of st.lanes) {
-    if (st.joined.has(peer)) continue;
+    if (st.joined.has(peer) || now - row.at < PENDING_MS) continue;
     if (row.at < at) {
       at = row.at;
       oldest = peer;

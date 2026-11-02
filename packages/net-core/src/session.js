@@ -24,7 +24,7 @@ import { createWorld } from "./world.js";
 /** @param {Record<string, any>} options */
 export function createSession(options) {
   const s = blank(options);
-  initIds(s);
+  initIds(s, options);
   s.world = createWorld(hooks(s));
   s.net = createNet(s);
   s.sendDirect = (message) => sendDirect(s, message);
@@ -95,11 +95,36 @@ function blank(options) {
   return s;
 }
 
-/** @param {any} s */
-function initIds(s) {
-  s.nextNetId = 1;
+/** @param {any} s @param {Record<string, any>} options */
+function initIds(s, options) {
+  s.nextNetId = startId(options.idStart);
   s.epochs = new Map();
   s.nextEpoch = 0;
+}
+
+/** @param {any} start */
+function startId(start) {
+  if (start == null) return 1;
+  const id = /** @type {number} */ (start);
+  if (!Number.isInteger(id) || id < 1 || id > 0x100000000) throw new Error("bad id start");
+  return id;
+}
+
+/** Last id is 2^32-1. The next spawn ends the session instead of wrapping. */
+function takeId(s) {
+  if (s.nextNetId > 0xffffffff) {
+    exhaustIds(s);
+    throw new Error("entity ids exhausted");
+  }
+  return s.nextNetId++;
+}
+
+/** @param {any} s */
+function exhaustIds(s) {
+  if (s.ended) return;
+  s.ended = true;
+  s.reason = "ids";
+  sendBye(s);
 }
 
 function freshStats() {
@@ -137,7 +162,7 @@ function hooks(s) {
   return {
     canSpawn: (local) => local || s.isHost,
     canDespawn: () => s.isHost,
-    allocId: () => s.nextNetId++,
+    allocId: () => takeId(s),
     entityCap: () => s.manifest.maxEntities,
     onSpawn: (entity) => {
       if (s.isHost) trackSpawn(s, entity);
@@ -249,15 +274,7 @@ function stepHost(s) {
   drain(s);
   rememberLocal(s);
   const prev = noteAnims(s);
-  s.inUpdate = true;
-  try {
-    s.game.update(1 / s.manifest.tickHz, inputsFor(s), s.world, s.net);
-  } catch (err) {
-    if (!customCap(err)) throw err;
-    s.stats.customReverted += 1;
-  } finally {
-    s.inUpdate = false;
-  }
+  runUpdate(s);
   stampAnims(s, prev);
   s.stats.phases.other += performance.now() - t;
   refreshSlots(s);
@@ -265,6 +282,28 @@ function stepHost(s) {
   pruneInputs(s);
   s.shownTick = s.tick;
   s.tick += 1;
+}
+
+/** @param {any} s */
+function runUpdate(s) {
+  s.inUpdate = true;
+  try {
+    s.game.update(1 / s.manifest.tickHz, inputsFor(s), s.world, s.net);
+  } catch (err) {
+    if (!customCap(err)) throw err;
+    s.stats.customReverted += 1;
+    warnPartial(s);
+  } finally {
+    s.inUpdate = false;
+  }
+}
+
+/** The oversize write is reverted. Earlier edits in the tick stay, and dev games are told. */
+function warnPartial(s) {
+  const message = "custom data exceeds 1024 bytes; this tick was left partial";
+  const warn = s.game && s.game.warn;
+  if (s.dev && typeof warn === "function") warn(message);
+  else if (s.dev) console.warn(message);
 }
 
 /** @param {any} s @param {any} peer */

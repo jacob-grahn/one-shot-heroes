@@ -2,7 +2,7 @@
 
 import { ackHeader, nextSeq, rememberSent } from "./ack.js";
 import { avatarFocus, relevance } from "./focus.js";
-import { acceptCustom as checkCustom } from "./entity.js";
+import { acceptedCustom, commitCustom, isCustomDirty } from "./entity.js";
 import { emit } from "./relay.js";
 import { planPackets } from "./select.js";
 import {
@@ -13,7 +13,7 @@ import {
   customOps,
   diffMask,
   encodeOps,
-  fillQuant,
+  fillPose,
   sameState,
   updateBytes,
   writeUpdate,
@@ -34,18 +34,27 @@ export function refreshSlots(s) {
 function fillOne(s, entity, quant) {
   if (entity.local) return;
   let slot = s.slots.get(entity.id);
+  const fresh = !slot;
   if (!slot) {
     slot = { custom: EMPTY };
     s.slots.set(entity.id, slot);
   }
   const prev = slot.custom;
-  fillQuant(slot, entity, quant);
-  const verdict = checkCustom(entity, slot.custom, prev);
-  if (verdict === "same" || verdict === "empty") slot.custom = prev;
-  if (verdict === "reverted") {
-    fillQuant(slot, entity, quant);
-    s.stats.customReverted += 1;
+  fillPose(slot, entity, quant);
+  if (!fresh && !isCustomDirty(entity)) return;
+  keepCustom(s, slot, entity, prev);
+}
+
+/** Size-check and copy custom only after a write. Unchanged entities keep the last snapshot. */
+function keepCustom(s, slot, entity, prev) {
+  const verdict = commitCustom(entity, prev);
+  if (verdict === "same") return;
+  if (verdict === "empty") {
+    slot.custom = EMPTY;
+    return;
   }
+  if (verdict === "reverted") s.stats.customReverted += 1;
+  slot.custom = acceptedCustom(entity);
 }
 
 /** @param {any} s @param {any} peer */

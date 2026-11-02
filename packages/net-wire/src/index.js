@@ -7,6 +7,7 @@ export { checkRecord, checkValue } from "./schema.js";
 export { encodePacket, decodePacket } from "./packet.js";
 export {
   quantize,
+  fillPose,
   fillQuant,
   updateBytes,
   defaultState,

@@ -57,19 +57,48 @@ test("more than 64 peer ids are refused until an idle lane is evicted", () => {
   let now = 0;
   const mediator = createMediator({ now: () => now });
   for (let i = 0; i < 64; i++) {
-    const result = mediator.inspect(hello(i + 1), {
-      peer: "p" + i,
-      dir: "in",
-      reliable: true,
-    });
-    assert.equal(result.ok, true);
+    const peer = "p" + i;
+    assert.equal(mediator.inspect(hello(i + 1), { peer, dir: "in", reliable: true }).ok, true);
+    assert.equal(mediator.inspect(welcome(i + 1), { peer, dir: "out", reliable: true }).ok, true);
   }
   const refused = mediator.inspect(hello(80), { peer: "p64", dir: "in", reliable: true });
   assert.equal(refused.code, "lanes");
   assert.ok(mediator.violations.includes("lanes"));
+  now = 1500;
+  const held = mediator.inspect(hello(80), { peer: "p64", dir: "in", reliable: true });
+  assert.equal(held.code, "lanes");
   now = 10000;
   const again = mediator.inspect(hello(80), { peer: "p64", dir: "in", reliable: true });
   assert.equal(again.ok, true);
+});
+
+test("64 rejected hellos do not block an honest peer", () => {
+  let now = 0;
+  const mediator = createMediator({ now: () => now });
+  for (let i = 0; i < 64; i++) {
+    const peer = "bad" + i;
+    assert.equal(mediator.inspect(hello(i + 1), { peer, dir: "in", reliable: true }).ok, true);
+    mediator.inspect(encodePacket({ tick: 1 }, [{ type: "reject", code: 2 }]), {
+      peer,
+      dir: "out",
+      reliable: true,
+    });
+  }
+  const early = mediator.inspect(hello(99), { peer: "honest", dir: "in", reliable: true });
+  assert.equal(early.code, "lanes");
+  now = 1500;
+  const honest = mediator.inspect(hello(99), { peer: "honest", dir: "in", reliable: true });
+  assert.equal(honest.ok, true);
+});
+
+test("mediator maxEntities follows the manifest", () => {
+  const manifest = defineManifest({ maxEntities: 7 });
+  const mediator = createMediator({ manifest, now: () => 0 });
+  assert.equal(mediator.caps.maxEntities, 7);
+  assert.throws(
+    () => createMediator({ manifest, caps: { maxEntities: 3 }, now: () => 0 }),
+    /does not match the manifest/,
+  );
 });
 
 test("despawn frees a live entity slot", () => {
@@ -150,6 +179,13 @@ function snap(total) {
 /** @param {number} id */
 function hello(id) {
   return encodePacket({ tick: 1 }, [{ type: "hello", playerId: id, proto: 2, hash: "abcd" }]);
+}
+
+/** @param {number} id */
+function welcome(id) {
+  return encodePacket({ tick: 1 }, [
+    { type: "welcome", you: id, seed: 1, hostId: 0, players: [0, id] },
+  ]);
 }
 
 function big() {

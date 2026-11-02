@@ -23,7 +23,7 @@ init(world, net);
 update(dt, inputs, world, net); // host only
 render(state, alpha, draw, net);
 
-world.spawn(type, init, { local: true });
+world.spawn(type, init, { local: true }); // throws "entity cap is N" past manifest.maxEntities
 world.despawn(entity);
 world.query(type);
 
@@ -36,17 +36,17 @@ net.setFocusHint(x, y); // client hint, focus mode "avatar"
 
 `createSession({ manifest, game, transport, playerId, peerId, isHost, hostPeerId })` is the wrapper. The host calls `step()` once per sim tick. Clients call `step()` to send inputs and take in packets. `render(draw)` builds the frozen view.
 
-Only the host runs `update`. Only the host spawns networked entities and assigns their ids (uint32, starting at 1, never reused). A client may spawn `{ local: true }` particles; those are never synced. Ids below 0 are local.
+Only the host runs `update`. Only the host spawns networked entities and assigns their ids (uint32, starting at 1, never reused). `world.spawn` throws `entity cap is N` when the live networked count is already `manifest.maxEntities` (default 400). A client may spawn `{ local: true }` particles; those are never synced. Ids below 0 are local. The counter stops at 2^32-1: the next spawn ends the session with reason `ids` and sends bye, instead of wrapping the id.
 
 ## Defaults Jacob can change
 
-Every value below is the default in `defineManifest` or `CAPS`. Pass a different value in the manifest, or pass `caps` to `createMediator`.
+Every value below is the default in `defineManifest` or `CAPS`. Pass a different value in the manifest, or pass `caps` to `createMediator`. `createMediator({ manifest })` copies `manifest.maxEntities` into the cap.
 
 | default                | value                                 | where                         |
 | ---------------------- | ------------------------------------- | ----------------------------- |
 | 2D only                | one position, one rotation in radians | entity fields                 |
 | players                | 8, including the host                 | `manifest.maxPlayers` (max 8) |
-| networked entities     | a few hundred; mediator cap 400       | `CAPS.maxEntities`            |
+| networked entities     | 400; spawn past that throws           | `manifest.maxEntities`        |
 | who runs logic         | the host                              | no client prediction in v1    |
 | sim rate               | 20 Hz                                 | `manifest.tickHz` (1..60)     |
 | interpolation delay    | 100 ms                                | `manifest.interpMs`           |
@@ -112,7 +112,7 @@ Each recipient has its own baseline, version counter, and Gaffer accumulator:
 acc += basePriority * relevance * dt
 ```
 
-`basePriority` comes from `manifest.types[type].priority` (default 1). Sending an entity resets its accumulator to 0. Packets are filled up to the byte budget, highest accumulator first, not up to a fixed item count. One voluntary packet is sent per recipient per tick. If a dirty entity is still unsent and its age is at least K ticks, extra packets go out the same tick until it has been sent. Resends use the same K bound so a lost packet is retried. No single packet exceeds the budget. Custom data over 1024 bytes throws `custom data exceeds 1024 bytes` at the assignment (`entity.custom = …` or a property set on that object) and at `world.spawn`, before the value is stored. A nested edit that slips past that check is reverted from the last snapshot that fit, and the host step still sends and advances. The byte size is measured only when that snapshot changes, and empty custom is skipped. Send paths do not throw: a single reliable message that cannot fit is counted on `stats.reliableDrops` and that peer is disconnected. Snapshot records that do not fit in the current datagram are carried in the next snapshot packet.
+`basePriority` comes from `manifest.types[type].priority` (default 1). Sending an entity resets its accumulator to 0. Packets are filled up to the byte budget, highest accumulator first, not up to a fixed item count. One voluntary packet is sent per recipient per tick. If a dirty entity is still unsent and its age is at least K ticks, extra packets go out the same tick until it has been sent. Resends use the same K bound so a lost packet is retried. No single packet exceeds the budget. Custom data over 1024 bytes throws `custom data exceeds 1024 bytes` at the assignment (`entity.custom = …`, a property set, or a nested write on that object) and at `world.spawn`, before the value is stored. The write marks that entity dirty. The tick size-checks and encodes custom only for dirty entities; unchanged custom keeps the last snapshot. A throw inside `update` leaves the tick partial: the oversize write is reverted, earlier edits in that tick stay, the step still sends, and in dev the game's `warn(message)` is called (or `console.warn` if the game has no `warn`). Send paths do not throw: a single reliable message that cannot fit is counted on `stats.reliableDrops` and that peer is disconnected. Snapshot records that do not fit in the current datagram are carried in the next snapshot packet.
 
 Relevance:
 
@@ -154,7 +154,7 @@ const mediator = createMediator({
 });
 ```
 
-`host.dropPeer` removes that peer. It also calls `transport.forget(peerId)` when the wrapped transport provides it, and `close` sends `bye` (from a client as well as the host) so the mediator drops that peer from `joined` and deletes its lane. A lane with no traffic for 10 seconds is evicted even if the peer had joined. When every lane is still in use, a new peer id is refused and the violation `lanes` is recorded. Fan-out for relayed events counts only peers still in `joined`. Unreliable traffic over the cap is dropped and resent by the normal ack loop. `inspect(bytes)` is the same check. The walk also rejects event names longer than `maxName` and event payloads over `maxEventBytes`.
+`host.dropPeer` removes that peer. It also calls `transport.forget(peerId)` when the wrapped transport provides it, and `close` sends `bye` (from a client as well as the host) so the mediator drops that peer from `joined` and deletes its lane. A hello occupies a lane but does not count as joined. The peer is joined only when the host sends `welcome`. A hello that is not accepted is evicted after 1.5 seconds, so a run of rejected hellos cannot hold the 64 lanes the way a joined peer can. A lane with no traffic for 10 seconds is evicted even if the peer had joined. When every lane is still in use, a new peer id is refused and the violation `lanes` is recorded. Fan-out for relayed events counts only peers still in `joined`. Pass the manifest to `createMediator({ manifest })` so `caps.maxEntities` is taken from `manifest.maxEntities`. An explicit `caps.maxEntities` that disagrees with the manifest throws at startup. Unreliable traffic over the cap is dropped and resent by the normal ack loop. `inspect(bytes)` is the same check. The walk also rejects event names longer than `maxName` and event payloads over `maxEventBytes`.
 
 Protocol version is 2.
 

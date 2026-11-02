@@ -20,6 +20,7 @@
 export const CAPS = Object.freeze({
   // Per peer, per direction. Seven peers at this cap cover the ~163 KiB/s host uplink.
   bytesPerSecond: 64 * 1024,
+  // Same default as defineManifest.maxEntities. Pass manifest to createMediator to copy it.
   maxEntities: 400,
   spawnPerSecond: 120,
   maxKeys: 16,

@@ -5,6 +5,7 @@ const N = 8;
 const E = 500;
 const TICKS = 100;
 const TAG = "x".repeat(140);
+const ALT = "y" + "x".repeat(139);
 const manifest = defineManifest({
   maxPlayers: N,
   maxEntities: E,
@@ -15,7 +16,9 @@ const manifest = defineManifest({
   custom: { tag: { type: "string", max: 160 } },
 });
 
-function bench() {
+function bench(mode) {
+  customMode = mode;
+  flip = 0;
   const net = createNetwork({ seed: 1, latency: 0 });
   const sessions = [];
   for (let i = 0; i < N; i++) {
@@ -42,6 +45,7 @@ function bench() {
     throw new Error("bench join failed");
   const host = sessions[0];
   for (let i = 0; i < 40; i++) {
+    flip ^= 1;
     for (const session of sessions) session.step();
     net.advance(dt);
   }
@@ -49,6 +53,7 @@ function bench() {
   const phases = { ...host.stats.phases };
   let hostMs = 0;
   for (let i = 0; i < TICKS; i++) {
+    flip ^= 1;
     const t = performance.now();
     host.step();
     hostMs += performance.now() - t;
@@ -61,6 +66,7 @@ function bench() {
   const perSec = Math.round(bytes / (TICKS / manifest.tickHz));
   const line = [
     `BENCH n=${N} e=${E} budget=${manifest.budget}`,
+    `custom=${mode}`,
     `msPerTick=${ms.toFixed(3)}`,
     `diff=${phase("diff")}`,
     `grid=${phase("grid")}`,
@@ -72,8 +78,7 @@ function bench() {
     `sessionBytesPerSec=${perSec}`,
     `hostUplinkKiBPerSec=${(perSec / 1024).toFixed(2)}`,
   ].join(" ");
-  if (host.stats.maxPacket > manifest.budget || ms > 8) throw new Error(line);
-  console.log(line);
+  return { line, ms, maxPacket: host.stats.maxPacket };
 }
 
 const game = {
@@ -88,8 +93,10 @@ const game = {
   },
   update(_dt, _inputs, world) {
     let n = 0;
+    const next = flip ? ALT : TAG;
     for (const entity of world.query("mob")) {
       if (n % 10 < 3) entity.x += 0.25;
+      if (customMode === "100%" || (customMode === "30%" && n % 10 < 3)) entity.custom.tag = next;
       n += 1;
     }
   },
@@ -104,4 +111,23 @@ function plainRequested() {
   return !!(env && env.env && env.env.NET_BENCH_PLAIN === "1");
 }
 
-if (env && env.env && env.env.NET_BENCH === "1") bench();
+let customMode = "still";
+let flip = 0;
+
+function runBench() {
+  if (plainRequested()) {
+    const row = bench("still");
+    console.log(row.line);
+    if (row.ms > 8 || row.maxPacket > manifest.budget) throw new Error(row.line);
+    return;
+  }
+  const rows = [bench("still"), bench("30%"), bench("100%")];
+  for (const row of rows) console.log(row.line);
+  const gated = rows[1];
+  if (gated.ms > 8 || gated.maxPacket > manifest.budget) throw new Error(gated.line);
+  for (const row of rows) {
+    if (row.maxPacket > manifest.budget) throw new Error(row.line);
+  }
+}
+
+if (env && env.env && env.env.NET_BENCH === "1") runBench();

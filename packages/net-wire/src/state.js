@@ -25,14 +25,19 @@ export function quantize(entity, q) {
   return slot;
 }
 
-/** Mutates a reused slot. One quantize per entity per tick, shared by every recipient. */
-export function fillQuant(slot, entity, q) {
+/** Pose fields only. Custom is snapshotted by the caller when it is dirty. */
+export function fillPose(slot, entity, q) {
   slot.x = toU16(num(entity.x), q.posMin, q.posMax);
   slot.y = toU16(num(entity.y), q.posMin, q.posMax);
   slot.rotation = toU16(wrapAngle(num(entity.rotation)), 0, Math.PI * 2);
   slot.scale = toU16(entity.scale == null ? 1 : entity.scale, q.scaleMin, q.scaleMax);
   slot.anim = (entity.anim || 0) & 65535;
   slot.animStart = (entity.animStart || 0) >>> 0;
+}
+
+/** Mutates a reused slot. One quantize per entity per tick, shared by every recipient. */
+export function fillQuant(slot, entity, q) {
+  fillPose(slot, entity, q);
   slot.custom = customSnap(entity.custom);
 }
 

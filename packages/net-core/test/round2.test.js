@@ -26,6 +26,7 @@ function setup(game = quiet, spec = manifest(), useMediator = false) {
   const mediator = useMediator
     ? createMediator({
         now: () => clock,
+        manifest: spec,
         onDisconnect(peer, code) {
           dropped.push(peer + ":" + code);
           if (host) host.dropPeer(peer);
@@ -252,7 +253,9 @@ test("dropPeer forgets the mediator lane so a later peer can join", () => {
   assert.equal(client.joined, true);
   for (let i = 0; i < 63; i++) {
     const result = mediator.inspect(
-      encodePacket({ tick: 1, flags: 1 }, [{ type: "hello", playerId: i + 2, proto: 2, hash: "abcd" }]),
+      encodePacket({ tick: 1, flags: 1 }, [
+        { type: "hello", playerId: i + 2, proto: 2, hash: "abcd" },
+      ]),
       { peer: "x" + i, dir: "in", reliable: true },
     );
     assert.equal(result.ok, true);
@@ -302,17 +305,79 @@ test("spawn refuses entity 401 instead of disconnecting clients", () => {
   assert.equal(host.ended, false);
   assert.equal(client.ended, false);
   assert.equal(host.world.query().length, 2);
+  host.world.despawn(host.world.query()[0]);
+  assert.doesNotThrow(() => host.world.spawn("d", {}));
+  assert.equal(host.world.query().length, 2);
 });
 
 test("an oversize nested custom edit does not abort the host step", () => {
-  const group = setup();
-  const blob = group.host.world.spawn("blob", { custom: { inv: [1] } });
-  group.run(2);
+  const warnings = [];
+  let armed = false;
+  const game = {
+    init(world, net) {
+      if (net.isHost) world.spawn("blob", { custom: { inv: [1] } });
+    },
+    update(_dt, _inputs, world) {
+      if (!armed) return;
+      const blob = world.query("blob")[0];
+      blob.x = 4;
+      blob.custom.inv.push("y".repeat(2000));
+      armed = false;
+    },
+    render() {},
+    warn(message) {
+      warnings.push(message);
+    },
+  };
+  const group = setup(game);
+  const blob = group.host.world.query("blob")[0];
+  assert.throws(() => blob.custom.inv.push("y".repeat(2000)), /custom data exceeds 1024/);
+  assert.equal(blob.custom.inv.length, 1);
+  armed = true;
   const tick = group.host.tick;
-  blob.custom.inv.push("y".repeat(2000));
-  assert.doesNotThrow(() => group.host.step());
+  assert.doesNotThrow(() => group.run(1));
   assert.ok(group.host.tick > tick);
   assert.equal(blob.custom.inv.length, 1);
+  assert.equal(blob.x, 4);
+  assert.ok(warnings.some((message) => message.includes("partial")));
+  assert.equal(group.host.ended, false);
+});
+
+test("entity ids stop at 2^32", () => {
+  const spec = defineManifest({ maxPlayers: 2 });
+  const net = createNetwork({ seed: 9, latency: 0 });
+  const host = createSession({
+    manifest: spec,
+    game: quiet,
+    transport: net.endpoint("h"),
+    playerId: 0,
+    peerId: "h",
+    isHost: true,
+    idStart: 0xffffffff,
+  });
+  const client = createSession({
+    manifest: spec,
+    game: quiet,
+    transport: net.endpoint("c"),
+    playerId: 1,
+    peerId: "c",
+    isHost: false,
+    hostPeerId: "h",
+  });
+  for (let t = 0; t < 6; t++) {
+    host.step();
+    client.step();
+    net.advance(20);
+  }
+  const last = host.world.spawn("a", {});
+  assert.equal(last.id, 0xffffffff);
+  assert.throws(() => host.world.spawn("b", {}), /entity ids exhausted/);
+  assert.equal(host.ended, true);
+  assert.equal(host.reason, "ids");
+  net.advance(20);
+  client.step();
+  assert.equal(client.ended, true);
+  assert.equal(client.reason, "host_left");
 });
 
 test("the host picks a random seed when the page does not", () => {

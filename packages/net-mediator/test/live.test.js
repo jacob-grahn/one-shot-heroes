@@ -43,6 +43,7 @@ test("mediator in front of an 8-player 400-entity session survives loss and chur
   });
   const mediator = createMediator({
     now: () => clock,
+    manifest,
     onDisconnect(peer, code) {
       dropped.push(peer + ":" + code);
       if (host) host.dropPeer(peer);
