@@ -236,3 +236,83 @@ export function valueBytes(v) {
   encodeValue(w, v, 0);
   return w.length;
 }
+
+const stamps = new WeakMap();
+const sealed = new WeakMap();
+const byHash = new Map();
+const EMPTY_STAMP = { gen: 0, len: 0, bytes: null };
+let genN = 0;
+
+/** Identity for a custom snapshot. Equal content shares one gen, so peers compare integers. */
+export function customStamp(obj) {
+  if (emptyCustom(obj)) return EMPTY_STAMP;
+  const hit = stamps.get(obj);
+  if (hit) return hit;
+  return adopt(obj, encodeBytes(obj));
+}
+
+/** Encode a live object once at write time. The snapshot reuses those bytes. */
+export function sealBytes(obj) {
+  const bytes = encodeBytes(obj);
+  if (bytes.length <= 1024) sealed.set(obj, bytes);
+  else sealed.delete(obj);
+  return bytes.length;
+}
+
+/** @param {Record<string, unknown>} live @param {Record<string, unknown>} snap */
+export function stampSnapshot(live, snap) {
+  const bytes = sealed.get(live);
+  if (bytes && !emptyCustom(snap)) return adopt(snap, bytes);
+  return customStamp(snap);
+}
+
+/** @param {Record<string, unknown>} obj */
+export function clearSeal(obj) {
+  sealed.delete(obj);
+}
+
+/** @param {Record<string, unknown>} obj @param {Uint8Array} bytes */
+function adopt(obj, bytes) {
+  const hash = fnvBytes(bytes);
+  const known = byHash.get(hash);
+  if (known && known.len === bytes.length && sameBytes(known.bytes, bytes)) {
+    stamps.set(obj, known);
+    return known;
+  }
+  const stamp = { gen: ++genN, len: bytes.length, bytes };
+  stamps.set(obj, stamp);
+  if (!known && bytes.length <= 1024 && byHash.size < 4096) byHash.set(hash, stamp);
+  return stamp;
+}
+
+/** @param {unknown} obj */
+function emptyCustom(obj) {
+  if (!obj || obj === EMPTY) return true;
+  for (const key in /** @type {Record<string, unknown>} */ (obj)) {
+    if (Object.prototype.hasOwnProperty.call(obj, key)) return false;
+  }
+  return true;
+}
+
+/** @param {Record<string, unknown>} obj */
+function encodeBytes(obj) {
+  const w = createWriter();
+  encodeValue(w, obj, 0);
+  return w.finish();
+}
+
+/** @param {Uint8Array} bytes */
+function fnvBytes(bytes) {
+  let h = 2166136261;
+  for (let i = 0; i < bytes.length; i++) {
+    h ^= bytes[i];
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+
+/** @param {Uint8Array} a @param {Uint8Array} b */
+function sameBytes(a, b) {
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
+}

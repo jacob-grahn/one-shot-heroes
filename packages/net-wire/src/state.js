@@ -1,6 +1,7 @@
 /** Quantized entity snapshots, deltas against a baseline, and exact default restoration. */
 
-import { EMPTY, canon, cloneCustom, customEqual, plainClone } from "./custom.js";
+import { encodeUtf8 } from "./bin.js";
+import { EMPTY, canon, cloneCustom, customStamp, encodeOps, plainClone } from "./custom.js";
 import { F_ANIM, F_CUSTOM, F_ROT, F_SCALE, F_START, F_X, F_Y } from "./defaults.js";
 import { userText } from "./keys.js";
 import { fromU16, toU16, wrapAngle } from "./quant.js";
@@ -76,8 +77,70 @@ export function diffMask(cur, base) {
   if (cur.scale !== base.scale) mask |= F_SCALE;
   if (cur.anim !== base.anim) mask |= F_ANIM;
   if (cur.animStart !== base.animStart) mask |= F_START;
-  if (cur.custom !== base.custom && !customEqual(cur.custom, base.custom)) mask |= F_CUSTOM;
+  if (cur.custom !== base.custom && customStamp(cur.custom).gen !== customStamp(base.custom).gen)
+    mask |= F_CUSTOM;
   return mask;
+}
+
+const deltaLen = new Map();
+
+/** Byte length of the custom ops from base to cur. Computed once per distinct pair and shared. */
+export function customDeltaLen(cur, base) {
+  if (cur === base) return 0;
+  const a = customStamp(cur || EMPTY);
+  const b = customStamp(base || EMPTY);
+  if (a.gen === b.gen) return 0;
+  let inner = deltaLen.get(a.gen);
+  if (!inner) {
+    if (deltaLen.size > 4096) deltaLen.clear();
+    inner = new Map();
+    deltaLen.set(a.gen, inner);
+  }
+  let n = inner.get(b.gen);
+  if (n == null) {
+    n = opBytes(cur || EMPTY, base || EMPTY);
+    inner.set(b.gen, n);
+  }
+  return n;
+}
+
+const tally = {
+  n: 0,
+  u8() {
+    this.n += 1;
+  },
+  u16() {
+    this.n += 2;
+  },
+  u32() {
+    this.n += 4;
+  },
+  i32() {
+    this.n += 4;
+  },
+  f32() {
+    this.n += 4;
+  },
+  bytes(u) {
+    this.n += u.length;
+  },
+  str16(s) {
+    this.n += 2 + utf8len(s);
+  },
+};
+
+/** @param {Record<string, unknown>} cur @param {Record<string, unknown>} base */
+function opBytes(cur, base) {
+  tally.n = 0;
+  encodeOps(tally, customOps(cur, base));
+  return tally.n;
+}
+
+/** @param {string} s */
+function utf8len(s) {
+  const n = s.length;
+  for (let i = 0; i < n; i++) if (s.charCodeAt(i) > 127) return encodeUtf8(s).length;
+  return n;
 }
 
 /** @param {Record<string, any>} a @param {Record<string, any>} b */

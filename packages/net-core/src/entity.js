@@ -1,6 +1,6 @@
 /** Plain entity records. Custom writes mark the entity dirty; the tick snapshots only those. */
 
-import { EMPTY, customEqual, isUserText, plainClone, valueBytes } from "./wire.js";
+import { EMPTY, customStamp, isUserText, plainClone, sealBytes, stampSnapshot, clearSeal, valueBytes } from "./wire.js";
 
 const BAD = new Set(["__proto__", "constructor", "prototype"]);
 const CAP = 1024;
@@ -44,13 +44,17 @@ export function isCustomDirty(entity) {
 export function commitCustom(entity, prev) {
   if (!entity || entity.local) return "skip";
   dirty.delete(entity);
-  const snap = snapshot(boxes.get(entity));
+  const live = boxes.get(entity);
+  const snap = snapshot(live);
   if (snap === EMPTY) return remember(entity, EMPTY, "empty");
-  if (prev && prev !== EMPTY && customEqual(snap, prev)) return "same";
-  if (valueBytes(snap) <= CAP) return remember(entity, snap, "ok");
-  entity.custom = lastGood.get(entity) || {};
-  dirty.delete(entity);
-  return "reverted";
+  const stamp = stampSnapshot(live, snap);
+  if (stamp.len > CAP) {
+    entity.custom = lastGood.get(entity) || {};
+    dirty.delete(entity);
+    return "reverted";
+  }
+  if (prev && prev !== EMPTY && customStamp(prev).gen === stamp.gen) return "same";
+  return remember(entity, snap, "ok");
 }
 
 /** @param {any} entity */
@@ -103,7 +107,7 @@ function watch(entity, box, root) {
       return writeKey(scope, target, key, value);
     },
     deleteProperty(target, key) {
-      return dropKey(entity, target, key);
+      return dropKey(scope, target, key);
     },
   });
   views.set(box, view);
@@ -128,7 +132,7 @@ function writeKey(scope, target, key, value) {
     len: Array.isArray(target) ? target.length : -1,
   };
   target[key] = keep(value);
-  if (valueBytes(scope.root) <= CAP) {
+  if (sealBytes(scope.root) <= CAP) {
     dirty.add(scope.entity);
     return true;
   }
@@ -143,11 +147,12 @@ function restoreKey(target, key, prior) {
   if (prior.len >= 0) target.length = prior.len;
 }
 
-/** @param {any} entity @param {Record<string, unknown>} target @param {string | symbol} key */
-function dropKey(entity, target, key) {
+/** @param {{ entity: any, root: Record<string, unknown> }} scope @param {Record<string, unknown>} target @param {string | symbol} key */
+function dropKey(scope, target, key) {
   if (typeof key !== "string") return false;
   delete target[key];
-  dirty.add(entity);
+  clearSeal(scope.root);
+  dirty.add(scope.entity);
   return true;
 }
 

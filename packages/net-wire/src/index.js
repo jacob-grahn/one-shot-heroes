@@ -15,6 +15,7 @@ export {
   cloneState,
   sameState,
   diffMask,
+  customDeltaLen,
   materialize,
 } from "./state.js";
 export { userText, isUserText, asPlain } from "./keys.js";
@@ -22,7 +23,11 @@ export {
   EMPTY,
   canon,
   customEqual,
+  customStamp,
   plainClone,
+  sealBytes,
+  stampSnapshot,
+  clearSeal,
   valueBytes,
   encodeValue,
   encodeOps,

@@ -10,16 +10,13 @@ import {
   MSG,
   PROTOCOL,
   createSink,
-  customOps,
+  customDeltaLen,
+  customStamp,
   diffMask,
-  encodeOps,
   fillPose,
-  sameState,
   updateBytes,
   writeUpdate,
 } from "./wire.js";
-
-const text = new TextEncoder();
 
 /** @param {any} s */
 export function refreshSlots(s) {
@@ -41,8 +38,8 @@ function fillOne(s, entity, quant) {
   }
   const prev = slot.custom;
   fillPose(slot, entity, quant);
-  if (!fresh && !isCustomDirty(entity)) return;
-  keepCustom(s, slot, entity, prev);
+  if (fresh || isCustomDirty(entity)) keepCustom(s, slot, entity, prev);
+  slot.plan = null;
 }
 
 /** Size-check and copy custom only after a write. Unchanged entities keep the last snapshot. */
@@ -85,11 +82,29 @@ function consider(s, peer, entity) {
   if (entity.local) return null;
   const cur = s.slots.get(entity.id);
   const acked = peer.confirmed.get(entity.id);
-  if (!cur || !acked || sameState(cur, acked.q)) {
-    if (acked) peer.dirtyAt.delete(entity.id);
+  if (!cur || !acked) return null;
+  if (samePose(cur, acked.q) && sameCustom(cur.custom, acked.q.custom)) {
+    peer.dirtyAt.delete(entity.id);
     return null;
   }
   return dirtyItem(s, peer, entity, cur);
+}
+
+/** @param {any} a @param {any} b */
+function samePose(a, b) {
+  return (
+    a.x === b.x &&
+    a.y === b.y &&
+    a.rotation === b.rotation &&
+    a.scale === b.scale &&
+    a.anim === b.anim &&
+    a.animStart === b.animStart
+  );
+}
+
+/** @param {any} a @param {any} b */
+function sameCustom(a, b) {
+  return a === b || customStamp(a).gen === customStamp(b).gen;
 }
 
 /** Patch against the spawn snapshot so a lost intermediate update cannot stick. */
@@ -102,14 +117,33 @@ function patchBase(peer, entity, acked) {
 function dirtyItem(s, peer, entity, cur) {
   const base = patchBase(peer, entity, peer.confirmed.get(entity.id));
   if (!peer.dirtyAt.has(entity.id)) peer.dirtyAt.set(entity.id, s.tick);
-  const mask = diffMask(cur, base.q);
-  const customLen = mask & 64 ? customSize(cur, base.q) : 0;
-  const size = updateBytes(mask, customLen);
-  if (size + 20 > s.manifest.budget) {
+  const plan = planOf(cur, base.q);
+  if (plan.size + 20 > s.manifest.budget) {
     s.stats.skipped += 1;
     return null;
   }
-  return itemOf(entity, cur, base, { age: s.tick - peer.dirtyAt.get(entity.id), size });
+  return itemOf(entity, cur, base, { age: s.tick - peer.dirtyAt.get(entity.id), size: plan.size });
+}
+
+/** One pose-and-custom diff per distinct baseline. Later peers with the same spawn reuse it. */
+function planOf(cur, base) {
+  const gen = customStamp(base.custom).gen;
+  const hit = cur.plan;
+  if (hit && hit.gen === gen && samePose(hit, base)) return hit;
+  const mask = diffMask(cur, base);
+  const customLen = mask & 64 ? customDeltaLen(cur.custom, base.custom) : 0;
+  const plan = {
+    gen,
+    x: base.x,
+    y: base.y,
+    rotation: base.rotation,
+    scale: base.scale,
+    anim: base.anim,
+    animStart: base.animStart,
+    size: updateBytes(mask, customLen),
+  };
+  cur.plan = plan;
+  return plan;
 }
 
 /** @param {any} entity @param {any} cur @param {any} conf @param {{ age: number, size: number }} meta */
@@ -123,40 +157,6 @@ function itemOf(entity, cur, conf, meta) {
     age: meta.age,
     size: meta.size,
     pri: 0,
-  };
-}
-
-/** @param {any} cur @param {any} base */
-function customSize(cur, base) {
-  const w = counter();
-  encodeOps(w, customOps(cur.custom, base.custom));
-  return w.n;
-}
-
-function counter() {
-  return {
-    n: 0,
-    u8() {
-      this.n += 1;
-    },
-    u16() {
-      this.n += 2;
-    },
-    u32() {
-      this.n += 4;
-    },
-    i32() {
-      this.n += 4;
-    },
-    f32() {
-      this.n += 4;
-    },
-    bytes(u) {
-      this.n += u.length;
-    },
-    str16(s) {
-      this.n += 2 + text.encode(s).length;
-    },
   };
 }
 
