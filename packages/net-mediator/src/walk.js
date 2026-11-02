@@ -7,6 +7,7 @@ const BAD = new Set(["__proto__", "constructor", "prototype"]);
 
 /** @param {any} caps @param {any} draft @param {any} packet @param {number} size */
 export function walk(caps, draft, packet, size) {
+  if (!draft.spawnIds) draft.spawnIds = [];
   for (const message of packet.messages) {
     const code = one(caps, draft, message, size);
     if (code) return code;
@@ -22,8 +23,16 @@ function one(caps, draft, message, size) {
   if (message.type === "snap") return snap(caps, draft, message, size);
   if (message.type === "state") return records(caps, message.records);
   if (message.type === "input") return samples(caps, message.samples);
-  if (message.type === "event") return walkValue(message.payload, 1, caps);
+  if (message.type === "event") return eventCap(caps, message);
   return "";
+}
+
+/** @param {any} caps @param {any} message */
+function eventCap(caps, message) {
+  const name = typeof message.name === "string" ? message.name : "";
+  if (!name || name.length > caps.maxName) return "name";
+  if (name.length + valueBytes(message.payload) > caps.maxEventBytes) return "event";
+  return walkValue(message.payload, 1, caps);
 }
 
 /** @param {any} draft */
@@ -40,9 +49,8 @@ function despawn(draft) {
 
 /** @param {any} caps @param {any} draft @param {any} record */
 function spawn(caps, draft, record) {
-  draft.entities += 1;
-  draft.spawns += 1;
-  if (draft.entities > caps.maxEntities) return "entities";
+  draft.spawnIds.push(record.id);
+  if (draft.spawnIds.length > caps.maxEntities) return "entities";
   return patch(caps, record.patch);
 }
 
@@ -52,7 +60,7 @@ function snap(caps, draft, message, size) {
   draft.snapBytes += size;
   if (draft.snapBytes > caps.maxSnapshotBytes) return "snapshot";
   if (message.total > caps.maxEntities) return "entities";
-  draft.entities = message.total;
+  draft.snapEntities = message.total;
   return records(caps, message.records);
 }
 

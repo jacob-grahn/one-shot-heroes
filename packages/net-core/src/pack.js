@@ -44,6 +44,6 @@ export function packBudget(items, k, fits) {
 function pushExtra(packets, extra, item, fits) {
   if (fits(extra.concat([item]))) return extra.concat([item]);
   if (extra.length) packets.push(extra);
-  if (!fits([item])) throw new Error("entity exceeds byte budget");
+  if (!fits([item])) return [];
   return [item];
 }

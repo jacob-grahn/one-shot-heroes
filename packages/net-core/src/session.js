@@ -72,7 +72,7 @@ function blank(options) {
     inputHist: [],
     inputLog: new Map(),
     listeners: new Map(),
-    seen: new Set(),
+    seen: new Map(),
     eventSeq: 0,
     versions: new Map(),
     shown: new Map(),
@@ -85,6 +85,7 @@ function blank(options) {
     sink: null,
     stats: freshStats(),
   };
+  s.dropPeer = (peerId) => leave(s, peerId);
   s.rng = mulberry32(s.seed);
   s.est = () => (s.isHost ? s.shownTick : s.lastHostTick + (s.steps - s.lastHostAt));
   s.clockTick = () => (s.isHost && s.inUpdate ? s.tick : s.est());
@@ -151,6 +152,10 @@ function leave(s, peerId) {
   if (!peer) return;
   s.peers.delete(peerId);
   s.players = s.players.filter((player) => player.id !== peer.playerId);
+  s.inputLog.delete(peer.playerId);
+  s.hints.delete(peer.playerId);
+  s.focus.delete(peer.playerId);
+  s.seen.delete(peer.playerId);
   announce(s);
 }
 
@@ -238,6 +243,7 @@ function stepClient(s) {
     pushHist(s, s.est(), s.pendingLocal);
     s.pendingLocal = null;
   }
+  if (!s.joined && !s.ended && s.steps % 10 === 0) sendHello(s);
   if (s.joined && !s.ended) sendClient(s);
 }
 

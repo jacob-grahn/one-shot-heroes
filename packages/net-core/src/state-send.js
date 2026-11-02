@@ -75,6 +75,8 @@ function consider(s, peer, entity) {
   }
   if (!peer.dirtyAt.has(entity.id)) peer.dirtyAt.set(entity.id, s.tick);
   const customLen = mask & 64 ? customSize(cur, conf.q) : 0;
+  if (updateBytes(mask, customLen) + 20 > s.manifest.budget)
+    throw new Error("custom data exceeds the byte budget");
   return itemOf(entity, cur, conf, {
     age: s.tick - peer.dirtyAt.get(entity.id),
     size: updateBytes(mask, customLen),
@@ -148,7 +150,8 @@ function gridOf(s, entity, focus) {
 
 /** @param {any} peer @param {any} item @param {{ dt: number, k: number, s: any }} ctx */
 function bump(peer, item, ctx) {
-  const acc = (peer.acc.get(item.id) || 0) + priorityOf(ctx.s, item.entity.type) * item.rel * ctx.dt;
+  const acc =
+    (peer.acc.get(item.id) || 0) + priorityOf(ctx.s, item.entity.type) * item.rel * ctx.dt;
   peer.acc.set(item.id, acc);
   return item.age >= ctx.k ? 1e12 + item.age : acc;
 }

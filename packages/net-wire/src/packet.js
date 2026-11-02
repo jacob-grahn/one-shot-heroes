@@ -36,7 +36,13 @@ function writeMessage(w, message) {
   w.bytes(bytes);
 }
 
-/** @param {Uint8Array} bytes */
+/**
+ * @param {Uint8Array} bytes
+ * @returns {(
+ *   | { ok: true, version: number, flags: number, tick: number, seq: number, ack: number, ackBits: number, messages: any[] }
+ *   | { ok: false, error: string }
+ * )}
+ */
 export function decodePacket(bytes) {
   try {
     return { ok: true, ...parsePacket(bytes) };

@@ -49,7 +49,17 @@ export function normEvents(obj) {
   if (!obj) return [];
   return Object.keys(obj)
     .sort()
-    .map((name) => ({ name, fields: normMap(obj[name]) }));
+    .map((name) => normEvent(name, obj[name]));
+}
+
+/** Peer events relay only when the manifest sets `relay: true` on that event. */
+function normEvent(name, src) {
+  const body = src || {};
+  const fields = Object.create(null);
+  for (const key of Object.keys(body)) {
+    if (key !== "relay") fields[key] = body[key];
+  }
+  return { name, relay: body.relay === true, fields: normMap(fields) };
 }
 
 /** @param {number} v @param {number} min @param {number} max */
@@ -87,11 +97,30 @@ export function checkValue(field, value, depth) {
   if (depth > 8) return false;
   if (field.type === "bool") return typeof value === "boolean";
   if (field.type === "float") return typeof value === "number" && Number.isFinite(value);
-  if (field.type === "string") return typeof value === "string" && value.length <= field.max;
+  if (field.type === "string") return stringOk(value, field.max);
   if (field.type === "int") return checkInt(field, value);
   if (field.type === "array") return checkArr(field, value, depth);
   if (field.type === "object") return checkRecordAt(field.fields, value, false, depth + 1);
   return false;
+}
+
+/** @param {unknown} value @param {number} max */
+function stringOk(value, max) {
+  const text = stringOf(value);
+  return text != null && text.length <= max;
+}
+
+/** @param {unknown} value */
+function stringOf(value) {
+  if (typeof value === "string") return value;
+  if (
+    value &&
+    /** @type {{ userContent?: boolean, text?: unknown }} */ (value).userContent === true
+  )
+    return typeof (/** @type {{ text?: unknown }} */ (value).text) === "string"
+      ? /** @type {{ text: string }} */ (value).text
+      : null;
+  return null;
 }
 
 /** @param {Record<string, any>} field @param {unknown} value */

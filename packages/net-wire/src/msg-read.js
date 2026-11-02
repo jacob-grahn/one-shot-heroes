@@ -49,7 +49,7 @@ function readEvent(r) {
   const id = r.u32();
   const origin = r.u8();
   const name = readShort(r);
-  return { id, origin, name, payload: plainClone(decodeValue(r, 0)) };
+  return { id, origin, name, payload: decodeValue(r, 0) };
 }
 
 function readSnap(r) {

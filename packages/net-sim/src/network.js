@@ -2,7 +2,7 @@
 
 import { createClock } from "./clock.js";
 import { createEndpoint } from "./endpoint.js";
-import { mulberry32 } from "./rng.js";
+import { mulberry32 } from "@osh/net-wire/rng";
 
 /**
  * @param {{

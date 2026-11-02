@@ -88,4 +88,7 @@ const game = {
   render() {},
 };
 
-if (process.env.NET_BENCH === "1") bench();
+const env = /** @type {{ env?: { NET_BENCH?: string } }} */ (
+  /** @type {any} */ (globalThis).process
+);
+if (env && env.env && env.env.NET_BENCH === "1") bench();

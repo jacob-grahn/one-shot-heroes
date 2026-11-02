@@ -43,7 +43,7 @@ module.exports = {
     {
       name: 'net-mediator-not-core', severity: 'error',
       comment: 'The mediator parses the wire format itself so a tampered in-game library cannot raise its caps.',
-      from: { path: '^packages/net-mediator/' }, to: { path: '^packages/net-core/' },
+      from: { path: '^packages/net-mediator/src/' }, to: { path: '^packages/net-core/' },
     },
     {
       name: 'net-wire-pure', severity: 'error',
@@ -52,8 +52,14 @@ module.exports = {
     },
     {
       name: 'net-sim-transport-only', severity: 'error',
-      comment: 'The simulated transport moves bytes. It does not import the game library, the wire codec, or the mediator.',
-      from: { path: '^packages/net-sim/' }, to: { path: '^packages/(net-core|net-wire|net-mediator)/|^apps/' },
+      comment: 'The simulated transport moves bytes. It does not import the game library or the mediator.',
+      from: { path: '^packages/net-sim/' }, to: { path: '^packages/(net-core|net-mediator)/|^apps/' },
+    },
+    {
+      name: 'net-sim-rng-only', severity: 'error',
+      comment: 'The sim shares the seeded rng and does not import the rest of the wire codec.',
+      from: { path: '^packages/net-sim/' },
+      to: { path: '^packages/net-wire/', pathNot: 'net-wire/src/rng\\.js$' },
     },
     { name: 'no-dev-deps-in-src', severity: 'error', from: { path: '^(apps|packages)/[^/]+/src/' }, to: { dependencyTypes: ['npm-dev'] } },
     { name: 'not-to-unresolvable', severity: 'error', from: {}, to: { couldNotResolve: true } },

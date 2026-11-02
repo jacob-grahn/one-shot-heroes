@@ -2,6 +2,7 @@
 
 export {
   EMPTY,
+  MAX_MESSAGES,
   MSG,
   PROTOCOL,
   applyState,
@@ -17,10 +18,13 @@ export {
   encodeOps,
   encodePacket,
   fillQuant,
+  isUserText,
   materialize,
   plainClone,
   quantize,
+  mulberry32,
   sameState,
   updateBytes,
+  valueBytes,
   writeUpdate,
 } from "@osh/net-wire";

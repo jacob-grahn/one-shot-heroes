@@ -3,4 +3,4 @@
 export { createClock } from "./clock.js";
 export { createNetwork } from "./network.js";
 export { assertTransport } from "./transport.js";
-export { mulberry32 } from "./rng.js";
+export { mulberry32 } from "@osh/net-wire/rng";

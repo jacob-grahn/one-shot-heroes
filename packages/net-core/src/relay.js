@@ -3,7 +3,7 @@
 import { ackHeader, nextSeq } from "./ack.js";
 import { takeBatches } from "./pack.js";
 import { createPeer } from "./peer.js";
-import { cloneState, defaultState, encodePacket, quantize } from "./wire.js";
+import { MAX_MESSAGES, cloneState, defaultState, encodePacket, quantize } from "./wire.js";
 
 /** @param {any} s @param {string} to @param {Uint8Array} bytes @param {{ reliable?: boolean, ids?: number[] }} [opts] */
 export function emit(s, to, bytes, opts) {
@@ -125,13 +125,36 @@ function snapSize(s, group, total) {
 
 /** @param {any} s @param {any} peer */
 export function flushReliable(s, peer) {
-  const pending = peer.queue;
-  if (!pending.length) return;
-  peer.queue = [];
-  const fit = (group) => encodePacket(head(s, 1), group).length <= s.manifest.budget;
-  const split = takeBatches(pending, fit);
-  if (split.overflow) throw new Error("reliable message exceeds byte budget");
-  for (const batch of split.batches) sendReliable(s, peer, batch);
+  if (!peer.queue.length) return;
+  const pending = peer.queue.splice(0);
+  let batch = [];
+  for (const message of pending) batch = pushReliable(s, peer, batch, message);
+  if (batch.length) sendReliable(s, peer, batch);
+}
+
+/** @param {any} s @param {any} peer @param {any[]} batch @param {any} message */
+function pushReliable(s, peer, batch, message) {
+  if (!fitsReliable(s, [message])) return batch;
+  if (batch.length && !fitsReliable(s, batch.concat([message]))) {
+    sendReliable(s, peer, batch);
+    return [message];
+  }
+  const next = batch.concat([message]);
+  if (next.length >= MAX_MESSAGES) {
+    sendReliable(s, peer, next);
+    return [];
+  }
+  return next;
+}
+
+/** @param {any} s @param {any[]} group */
+function fitsReliable(s, group) {
+  if (!group.length || group.length > MAX_MESSAGES) return false;
+  try {
+    return encodePacket(head(s, 1), group).length <= s.manifest.budget;
+  } catch (e) {
+    return false;
+  }
 }
 
 /** @param {any} s @param {any} peer @param {any[]} batch */

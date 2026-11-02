@@ -1,6 +1,6 @@
 /** Plain entity records. Nested custom data is read by snapshotting, not by a Proxy. */
 
-import { plainClone } from "./wire.js";
+import { plainClone, valueBytes } from "./wire.js";
 
 const BAD = new Set(["__proto__", "constructor", "prototype"]);
 
@@ -8,6 +8,8 @@ const BAD = new Set(["__proto__", "constructor", "prototype"]);
 export function createEntity(id, type, init, local) {
   if (typeof type !== "string" || !type || type.length > 32) throw new Error("bad entity type");
   const src = init || {};
+  const custom = copyCustom(src.custom);
+  if (!local && valueBytes(custom) > 1024) throw new Error("custom data exceeds 1024 bytes");
   return {
     id,
     type,
@@ -18,7 +20,7 @@ export function createEntity(id, type, init, local) {
     scale: src.scale == null ? 1 : finite(src.scale, 1),
     anim: finite(src.anim, 0) & 65535,
     animStart: finite(src.animStart, 0) >>> 0,
-    custom: copyCustom(src.custom),
+    custom,
   };
 }
 

@@ -6,32 +6,32 @@ Real WebRTC is a later deliverable. This one defines the transport interface and
 
 ## Module map
 
-| package | role |
-|---|---|
-| `@osh/net-wire` | Binary protocol, manifest, quantization, custom values. No session and no transport. |
-| `@osh/net-core` | The in-game library: world, host tick, deltas, interpolation, `net.*`. |
-| `@osh/net-sim` | `Transport` interface and the simulated network (fake clock, seeded loss). |
-| `@osh/net-mediator` | Host-page caps. Not imported by `@osh/net-core`. |
-| `@osh/net-examples` | A 2-player dots arena and a vote-driven text adventure. |
+| package             | role                                                                                 |
+| ------------------- | ------------------------------------------------------------------------------------ |
+| `@osh/net-wire`     | Binary protocol, manifest, quantization, custom values. No session and no transport. |
+| `@osh/net-core`     | The in-game library: world, host tick, deltas, interpolation, `net.*`.               |
+| `@osh/net-sim`      | `Transport` interface and the simulated network (fake clock, seeded loss).           |
+| `@osh/net-mediator` | Host-page caps. Not imported by `@osh/net-core`.                                     |
+| `@osh/net-examples` | A 2-player dots arena and a vote-driven text adventure.                              |
 
 `@osh/net-core` does not import `@osh/net-sim` or `@osh/net-mediator`. The host page injects a transport. The mediator wraps that transport in the host page's own module graph, because a game can tamper with the copy of the in-game library it was given.
 
 ## What a game sees
 
 ```js
-init(world, net)
-update(dt, inputs, world, net)   // host only
-render(state, alpha, draw, net)
+init(world, net);
+update(dt, inputs, world, net); // host only
+render(state, alpha, draw, net);
 
-world.spawn(type, init, { local: true })
-world.despawn(entity)
-world.query(type)
+world.spawn(type, init, { local: true });
+world.despawn(entity);
+world.query(type);
 
-net.isHost, net.me, net.players
-net.emit(name, payload), net.on(name, fn)
-net.time, net.tick, net.random()
-net.setFocus(playerId, x, y)     // host, focus mode "game"
-net.setFocusHint(x, y)           // client hint, focus mode "avatar"
+(net.isHost, net.me, net.players);
+(net.emit(name, payload), net.on(name, fn));
+(net.time, net.tick, net.random());
+net.setFocus(playerId, x, y); // host, focus mode "game"
+net.setFocusHint(x, y); // client hint, focus mode "avatar"
 ```
 
 `createSession({ manifest, game, transport, playerId, peerId, isHost, hostPeerId })` is the wrapper. The host calls `step()` once per sim tick. Clients call `step()` to send inputs and take in packets. `render(draw)` builds the frozen view.
@@ -42,34 +42,37 @@ Only the host runs `update`. Only the host spawns networked entities and assigns
 
 Every value below is the default in `defineManifest` or `CAPS`. Pass a different value in the manifest, or pass `caps` to `createMediator`.
 
-| default | value | where |
-|---|---|---|
-| 2D only | one position, one rotation in radians | entity fields |
-| players | 8, including the host | `manifest.maxPlayers` (max 8) |
-| networked entities | a few hundred; mediator cap 400 | `CAPS.maxEntities` |
-| who runs logic | the host | no client prediction in v1 |
-| sim rate | 20 Hz | `manifest.tickHz` (1..60) |
-| interpolation delay | 100 ms | `manifest.interpMs` |
-| teleport snap | 48 world units | `manifest.teleport` |
-| unreliable byte budget | 1200 bytes | `manifest.budget` |
-| starvation bound K | 8 ticks | `manifest.starvationK` |
-| input redundancy | last 4 ticks | `manifest.inputRedundancy` |
-| interest cell | 32 world units | `manifest.cell` |
-| avatar hint clamp | 64 world units | `manifest.focusClamp` |
-| position range | -2048..2048, 16-bit | `manifest.quant` |
-| scale range | 0..8, 16-bit | `manifest.quant` |
-| angle | 0..2π, 16-bit | fixed |
-| custom payload | about 1 KB per encoded custom value | `CAPS.maxCustomBytes` (1024) |
-| focus | `none` | `manifest.focus` |
-| host leave | the session ends | bye, or the host peer leaving |
-| events | reliable `net.emit` / `net.on` | not replayed to late joiners |
-| bytes/s | 64 KiB/s per mediator | `CAPS.bytesPerSecond` |
-| spawn rate | 30/s | `CAPS.spawnPerSecond` |
-| keys per custom object | 16 | `CAPS.maxKeys` |
-| string length | 128 | `CAPS.maxString` |
-| nesting | 4 | `CAPS.maxDepth` |
-| late-join snapshot | 64 KiB | `CAPS.maxSnapshotBytes` |
-| join rate | 4/s | `CAPS.joinPerSecond` |
+| default                | value                                 | where                         |
+| ---------------------- | ------------------------------------- | ----------------------------- |
+| 2D only                | one position, one rotation in radians | entity fields                 |
+| players                | 8, including the host                 | `manifest.maxPlayers` (max 8) |
+| networked entities     | a few hundred; mediator cap 400       | `CAPS.maxEntities`            |
+| who runs logic         | the host                              | no client prediction in v1    |
+| sim rate               | 20 Hz                                 | `manifest.tickHz` (1..60)     |
+| interpolation delay    | 100 ms                                | `manifest.interpMs`           |
+| teleport snap          | 48 world units                        | `manifest.teleport`           |
+| unreliable byte budget | 1200 bytes                            | `manifest.budget`             |
+| starvation bound K     | 8 ticks                               | `manifest.starvationK`        |
+| input redundancy       | last 4 ticks                          | `manifest.inputRedundancy`    |
+| interest cell          | 32 world units                        | `manifest.cell`               |
+| avatar hint clamp      | 64 world units                        | `manifest.focusClamp`         |
+| position range         | -2048..2048, 16-bit                   | `manifest.quant`              |
+| scale range            | 0..8, 16-bit                          | `manifest.quant`              |
+| angle                  | 0..2π, 16-bit                         | fixed                         |
+| custom payload         | about 1 KB per encoded custom value   | `CAPS.maxCustomBytes` (1024)  |
+| focus                  | `none`                                | `manifest.focus`              |
+| host leave             | the session ends                      | bye, or the host peer leaving |
+| events                 | reliable `net.emit` / `net.on`        | not replayed to late joiners  |
+| bytes/s                | 64 KiB/s per peer, per direction      | `CAPS.bytesPerSecond`         |
+| spawn rate             | 30/s                                  | `CAPS.spawnPerSecond`         |
+| keys per custom object | 16                                    | `CAPS.maxKeys`                |
+| string length          | 128                                   | `CAPS.maxString`              |
+| nesting                | 4                                     | `CAPS.maxDepth`               |
+| late-join snapshot     | 64 KiB                                | `CAPS.maxSnapshotBytes`       |
+| join rate              | 8/s per peer                          | `CAPS.joinPerSecond`          |
+| event name             | 32 characters                         | `CAPS.maxName`                |
+| event payload          | 1024 bytes                            | `CAPS.maxEventBytes`          |
+| event relay            | off unless `relay: true`              | manifest `events`             |
 
 Anti-cheat is not a goal. The caps exist to protect players' machines and the TURN bill. Schema validation of inputs (so `update` never sees a value outside the manifest) lives in the engine. The caps live in the mediator.
 
@@ -109,7 +112,7 @@ Each recipient has its own baseline, version counter, and Gaffer accumulator:
 acc += basePriority * relevance * dt
 ```
 
-`basePriority` comes from `manifest.types[type].priority` (default 1). Sending an entity resets its accumulator to 0. Packets are filled up to the byte budget, highest accumulator first, not up to a fixed item count. One voluntary packet is sent per recipient per tick. If a dirty entity is still unsent and its age is at least K ticks, extra packets go out the same tick until it has been sent. Resends use the same K bound so a lost packet is retried. No single packet exceeds the budget. A single entity that cannot fit is an error; the custom cap keeps a valid entity inside the budget.
+`basePriority` comes from `manifest.types[type].priority` (default 1). Sending an entity resets its accumulator to 0. Packets are filled up to the byte budget, highest accumulator first, not up to a fixed item count. One voluntary packet is sent per recipient per tick. If a dirty entity is still unsent and its age is at least K ticks, extra packets go out the same tick until it has been sent. Resends use the same K bound so a lost packet is retried. No single packet exceeds the budget. Custom data over 1024 bytes throws from `world.spawn` before the entity exists. Custom data that later outgrows the byte budget throws `custom data exceeds the byte budget` on the next host step, before that entity's version advances.
 
 Relevance:
 
@@ -137,7 +140,15 @@ Keys must be declared in the manifest (`custom`, `inputs`, `events`). The schema
 
 ## Mediator
 
-`createMediator({ now, caps }).wrap(transport)` drops any datagram that fails a cap and records the code on `violations`. `inspect(bytes)` is the same check without a transport. Counts use `now()`, so tests advance a fake clock. The walk is independent of the game's session: it decodes `@osh/net-wire` and enforces bytes/s, entity count, spawn rate, keys, string length, depth, custom size, snapshot size, join rate, and the three prototype keys.
+`createMediator({ now, caps, onDisconnect }).wrap(transport)` checks each datagram. Byte, spawn, and join windows are kept per peer and per direction, so one noisy peer cannot spend the room the others need. Spawns are counted once per entity id, at the source, not once per recipient. The 64 KiB/s per-peer cap is what makes the measured ~163 KiB/s host uplink (about 24 KiB/s on each of seven links) fit. Outbound reliable traffic is still forwarded when a byte window is already full, because dropping a spawn or a snapshot would desync that client. Any other reliable failure is not delivered: `onDisconnect` runs so the host page can drop that peer instead of leaving it half-synced. Unreliable traffic over the cap is dropped and resent by the normal ack loop. `inspect(bytes)` is the same check. The walk also rejects event names longer than `maxName` and event payloads over `maxEventBytes`.
+
+`@osh/net-core/src/wire.js` is the only module that imports `@osh/net-wire`. The codec would otherwise be imported from enough call sites to trip the fan-in gate. The file is a barrel on purpose.
+
+Peer events are delivered only when the name is in the manifest and the payload matches. They are relayed to other peers only when that event sets `relay: true`. Event strings decode as `{ text, userContent: true }`. Event ids are a per-sender sliding window of 64, and the host replaces `origin` with the joined player's id.
+
+A client resends hello until it is welcomed or rejected. Custom data over 1024 bytes throws `custom data exceeds 1024 bytes` from `world.spawn` before the entity exists.
+
+The host loop is not running in a Worker in this deliverable. `@osh/net-core` does not touch the DOM, so a later host page can call `step` from a Worker. That move is planned, not done.
 
 ## Deviations
 

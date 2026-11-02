@@ -1,13 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import {
-  createWriter,
-  decodePacket,
-  defaultState,
-  defineManifest,
-  encodePacket,
-  quantize,
-} from "@osh/net-wire";
+import { decodePacket, defaultState, defineManifest, encodePacket, quantize } from "@osh/net-wire";
+import { badKey } from "./craft.js";
 
 const protoNames = Object.getOwnPropertyNames(Object.prototype);
 
@@ -32,59 +26,51 @@ test("spawn packet round-trips a non-default position", () => {
     { type: "spawn", record: { id: 4, type: "pawn", version: 0, baseVersion: 0, cur, base } },
   ]);
   const decoded = decodePacket(packet);
-  assert.equal(decoded.ok, true);
+  if (decoded.ok === false) throw new Error("round trip failed");
   assert.equal(decoded.tick, 7);
   assert.equal(decoded.messages[0].record.id, 4);
   assert.equal(decoded.messages[0].record.patch.x, cur.x);
 });
 
-test("decoder fuzz does not throw or touch Object.prototype", () => {
-  let state = 3;
-  const rand = () => {
-    state = (state + 0x6d2b79f5) | 0;
-    return (state >>> 0) / 4294967296;
+test("mutated valid packets do not throw or pollute", () => {
+  const manifest = defineManifest({
+    inputs: { dx: { type: "int", min: -1, max: 1 } },
+    events: { chat: { msg: { type: "string", max: 40 } } },
+  });
+  const seeds = [
+    encodePacket({ tick: 5, flags: 1 }, [
+      { type: "hello", playerId: 1, proto: 1, hash: manifest.hash },
+    ]),
+    encodePacket({ tick: 5, flags: 1 }, [
+      { type: "event", id: 3, origin: 1, name: "chat", payload: { msg: "hi" } },
+    ]),
+    encodePacket({ tick: 5, seq: 3 }, [
+      { type: "input", samples: [{ tick: 4, values: { dx: 1 } }] },
+    ]),
+  ];
+  let state = 99;
+  const rnd = () => {
+    state = (state * 1103515245 + 12345) >>> 0;
+    return state / 4294967296;
   };
-  for (let i = 0; i < 300; i++) {
-    const len = Math.floor(rand() * 80);
-    const bytes = new Uint8Array(len);
-    for (let b = 0; b < len; b++) bytes[b] = Math.floor(rand() * 256);
-    const decoded = decodePacket(bytes);
+  for (let i = 0; i < 50000; i++) {
+    const decoded = decodePacket(mutate(seeds[i % seeds.length], rnd));
     assert.equal(typeof decoded.ok, "boolean");
   }
   for (const key of ["__proto__", "constructor", "prototype"]) {
     const decoded = decodePacket(badKey(key));
-    assert.equal(decoded.ok, false);
+    if (decoded.ok === true) throw new Error("expected bad_key");
     assert.equal(decoded.error, "bad_key");
   }
   assert.deepEqual(Object.getOwnPropertyNames(Object.prototype), protoNames);
   assert.equal(/** @type {any} */ ({}).polluted, undefined);
 });
 
-/** @param {string} key */
-function badKey(key) {
-  const body = createWriter();
-  body.u16(1);
-  body.u8(1);
-  body.bytes(new TextEncoder().encode("e"));
-  body.u32(0);
-  body.u32(0);
-  body.u8(64);
-  body.u8(1);
-  body.u8(key.length);
-  body.bytes(new TextEncoder().encode(key));
-  body.u8(2);
-  body.i32(1);
-  const payload = body.finish();
-  const packet = createWriter();
-  packet.u8(1);
-  packet.u8(0);
-  packet.u32(1);
-  packet.u16(1);
-  packet.u16(0);
-  packet.u32(0);
-  packet.u8(1);
-  packet.u8(4);
-  packet.u16(payload.length);
-  packet.bytes(payload);
-  return packet.finish();
+/** @param {Uint8Array} bytes @param {() => number} rnd */
+function mutate(bytes, rnd) {
+  const copy = new Uint8Array(bytes);
+  const flips = 1 + Math.floor(rnd() * 3);
+  for (let i = 0; i < flips; i++) copy[Math.floor(rnd() * copy.length)] = Math.floor(rnd() * 256);
+  if (rnd() < 0.2) return copy.slice(0, Math.floor(rnd() * copy.length));
+  return copy;
 }

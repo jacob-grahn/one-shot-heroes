@@ -1,13 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createMediator } from "@osh/net-mediator";
-import {
-  createWriter,
-  decodePacket,
-  defaultState,
-  defineManifest,
-  encodePacket,
-} from "@osh/net-wire";
+import { decodePacket, defaultState, defineManifest, encodePacket } from "@osh/net-wire";
+import { badKey } from "../../net-wire/test/craft.js";
 
 const manifest = defineManifest({});
 const base = defaultState(manifest.quant);
@@ -16,7 +11,9 @@ test("mediator enforces every cap, including prototype keys", () => {
   const entities = createMediator({ caps: { maxEntities: 1 }, now: () => 0 });
   assert.equal(entities.inspect(spawn(1, {})).ok, true);
   assert.equal(entities.inspect(spawn(2, {})).code, "entities");
-  assert.equal(rate(spawn(1, {}), 31, "spawnPerSecond", 30), "spawn_rate");
+  assert.equal(spawnRate(), "spawn_rate");
+  assert.equal(inspect(eventPacket("n".repeat(40), { msg: "a" }), {}).code, "name");
+  assert.equal(inspect(eventPacket("chat", fatEvent()), {}).code, "event");
   assert.equal(inspect(spawn(1, manyKeys(17)), {}).code, "keys");
   assert.equal(inspect(spawn(1, { name: "x".repeat(129) }), {}).code, "string");
   assert.equal(inspect(spawn(1, nest(5)), {}).code, "depth");
@@ -26,14 +23,23 @@ test("mediator enforces every cap, including prototype keys", () => {
   assert.equal(rate(big(), 3, "bytesPerSecond", 50), "bytes");
   for (const key of ["__proto__", "constructor", "prototype"]) {
     const packet = badKey(key);
-    assert.equal(decodePacket(packet).error, "bad_key");
+    const decoded = decodePacket(packet);
+    if (decoded.ok === true) throw new Error("expected bad_key");
+    assert.equal(decoded.error, "bad_key");
     assert.equal(inspect(packet, {}).code, "bad_key");
   }
   assert.equal(/** @type {any} */ ({}).polluted, undefined);
 });
 
-test("wrap drops a packet that fails a cap", () => {
-  const mediator = createMediator({ caps: { maxString: 4 }, now: () => 0 });
+test("wrap does not forward a reliable packet that fails a cap", () => {
+  const dropped = [];
+  const mediator = createMediator({
+    caps: { maxString: 4 },
+    now: () => 0,
+    onDisconnect(peer, code) {
+      dropped.push(peer + ":" + code);
+    },
+  });
   const seen = [];
   const transport = {
     send(_to, bytes) {
@@ -43,7 +49,22 @@ test("wrap drops a packet that fails a cap", () => {
   const wrapped = mediator.wrap(transport);
   wrapped.send("p", spawn(1, { name: "hello" }), true);
   assert.equal(seen.length, 0);
+  assert.deepEqual(dropped, ["p:string"]);
   assert.equal(mediator.violations[0], "string");
+});
+
+test("byte and join windows are per peer and per direction", () => {
+  const fat = big();
+  const limit = fat.length + 8;
+  const mediator = createMediator({ caps: { bytesPerSecond: limit }, now: () => 0 });
+  assert.equal(mediator.inspect(fat, { peer: "a", dir: "in" }).ok, true);
+  assert.equal(mediator.inspect(fat, { peer: "a", dir: "in" }).code, "bytes");
+  assert.equal(mediator.inspect(fat, { peer: "b", dir: "in" }).ok, true);
+  assert.equal(mediator.inspect(fat, { peer: "a", dir: "out" }).ok, true);
+  const joins = createMediator({ caps: { joinPerSecond: 1 }, now: () => 0 });
+  assert.equal(joins.inspect(hello(1), { peer: "a", dir: "in" }).ok, true);
+  assert.equal(joins.inspect(hello(2), { peer: "a", dir: "in" }).code, "join_rate");
+  assert.equal(joins.inspect(hello(3), { peer: "b", dir: "in" }).ok, true);
 });
 
 /** @param {Uint8Array} bytes @param {Record<string, number>} caps */
@@ -105,6 +126,7 @@ function manyKeys(n) {
 
 /** @param {number} levels */
 function nest(levels) {
+  /** @type {any} */
   let value = { leaf: 1 };
   for (let i = 0; i < levels; i++) value = { child: value };
   return value;
@@ -116,31 +138,26 @@ function fat() {
   return custom;
 }
 
-/** @param {string} key */
-function badKey(key) {
-  const body = createWriter();
-  body.u16(1);
-  body.u8(1);
-  body.bytes(new TextEncoder().encode("e"));
-  body.u32(0);
-  body.u32(0);
-  body.u8(64);
-  body.u8(1);
-  body.u8(key.length);
-  body.bytes(new TextEncoder().encode(key));
-  body.u8(2);
-  body.i32(1);
-  const payload = body.finish();
-  const packet = createWriter();
-  packet.u8(1);
-  packet.u8(0);
-  packet.u32(1);
-  packet.u16(1);
-  packet.u16(0);
-  packet.u32(0);
-  packet.u8(1);
-  packet.u8(4);
-  packet.u16(payload.length);
-  packet.bytes(payload);
-  return packet.finish();
+function spawnRate() {
+  const mediator = createMediator({
+    caps: { spawnPerSecond: 30, maxEntities: 1000 },
+    now: () => 0,
+  });
+  let code = "";
+  for (let id = 1; id <= 31; id++) {
+    const result = mediator.inspect(spawn(id, {}));
+    if (!result.ok) code = result.code;
+  }
+  return code;
+}
+
+/** @param {string} name @param {any} payload */
+function eventPacket(name, payload) {
+  return encodePacket({ tick: 1 }, [{ type: "event", id: 1, origin: 1, name, payload }]);
+}
+
+function fatEvent() {
+  const payload = {};
+  for (let i = 0; i < 12; i++) payload["k" + i] = "x".repeat(120);
+  return payload;
 }

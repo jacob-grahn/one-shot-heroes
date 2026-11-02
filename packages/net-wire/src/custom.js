@@ -202,7 +202,10 @@ function valEqual(a, b) {
   if (a === b) return true;
   if (Array.isArray(a)) return Array.isArray(b) && arrEqual(a, b);
   if (a && b && typeof a === "object" && typeof b === "object")
-    return objEqual(/** @type {Record<string, unknown>} */ (a), /** @type {Record<string, unknown>} */ (b));
+    return objEqual(
+      /** @type {Record<string, unknown>} */ (a),
+      /** @type {Record<string, unknown>} */ (b),
+    );
   return false;
 }
 

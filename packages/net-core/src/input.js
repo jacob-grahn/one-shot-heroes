@@ -12,9 +12,19 @@ export function rememberLocal(s) {
 
 /** @param {any} s @param {number} playerId @param {{ tick: number, values: any }} sample */
 export function rememberRemote(s, playerId, sample) {
-  if (!checkRecord(s.manifest.inputs, sample.values, false)) return;
+  if (!inWindow(s, sample.tick) || !checkRecord(s.manifest.inputs, sample.values, false)) return;
   const bag = log(s, playerId);
+  const cap = s.manifest.inputRedundancy + LEAD + 2;
+  if (!bag.has(sample.tick) && bag.size >= cap) return;
   if (!bag.has(sample.tick)) bag.set(sample.tick, sample.values);
+}
+
+const LEAD = 4;
+
+/** @param {any} s @param {number} stamp */
+function inWindow(s, stamp) {
+  const behind = s.manifest.inputRedundancy;
+  return stamp >= s.tick - behind && stamp <= s.tick + LEAD;
 }
 
 /** @param {any} s */
@@ -66,13 +76,13 @@ export function pushHist(s, stamp, values) {
 
 /** @param {any} s */
 export function pruneInputs(s) {
-  const keep = s.manifest.inputRedundancy + 2;
-  for (const bag of s.inputLog.values()) dropOld(bag, s.tick, keep);
+  const behind = s.manifest.inputRedundancy + 2;
+  for (const bag of s.inputLog.values()) dropOld(bag, s.tick, behind);
 }
 
-/** @param {Map<number, any>} bag @param {number} tick @param {number} keep */
-function dropOld(bag, tick, keep) {
+/** @param {Map<number, any>} bag @param {number} tick @param {number} behind */
+function dropOld(bag, tick, behind) {
   for (const stamp of [...bag.keys()]) {
-    if (tick - stamp > keep) bag.delete(stamp);
+    if (stamp < tick - behind || stamp > tick + LEAD) bag.delete(stamp);
   }
 }

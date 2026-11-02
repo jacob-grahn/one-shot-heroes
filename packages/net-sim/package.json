@@ -4,6 +4,9 @@
   "private": true,
   "type": "module",
   "main": "src/index.js",
+  "dependencies": {
+    "@osh/net-wire": "0.1.0"
+  },
   "exports": {
     ".": "./src/index.js"
   }

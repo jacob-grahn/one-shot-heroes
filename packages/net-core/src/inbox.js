@@ -2,7 +2,7 @@
 
 import { confirmSent, noteRecv } from "./ack.js";
 import { applyUpdate, beginSnap, dropEntity, installRecord } from "./apply.js";
-import { deliverEvent, queueEvent } from "./events.js";
+import { acceptPeerEvent, deliverEvent, queueEvent } from "./events.js";
 import { rememberRemote } from "./input.js";
 import { mulberry32 } from "./rng.js";
 import { acceptPeer, rejectPeer } from "./relay.js";
@@ -18,8 +18,19 @@ export function drain(s) {
 function dispatch(s, item) {
   const packet = s.decode(item.bytes);
   if (!packet.ok) return;
+  if (!fromPeer(s, item.from)) {
+    const hello = packet.messages.filter((message) => message.type === "hello");
+    if (!hello.length) return;
+    packet.messages = hello;
+  }
   note(s, item.from, packet);
   for (const message of packet.messages) handle(s, message, item.from, packet.tick);
+}
+
+/** Host takes hello from strangers. Clients take traffic only from the host. */
+function fromPeer(s, from) {
+  if (s.isHost) return s.peers.has(from);
+  return from === s.hostPeerId;
 }
 
 /** @param {any} s @param {string} from @param {any} packet */
@@ -79,8 +90,9 @@ function onWelcome(s, message) {
   s.players = message.players.map((id) => ({ id, host: id === message.hostId }));
 }
 
-/** @param {any} s @param {any} message */
-function onReject(s, message) {
+/** @param {any} s @param {any} message @param {string} from */
+function onReject(s, message, from) {
+  if (s.isHost || from !== s.hostPeerId) return;
   s.ended = true;
   s.reason = message.code === 2 ? "hash" : message.code === 1 ? "version" : "reject";
 }
@@ -99,9 +111,9 @@ function onDespawn(s, message) {
 function onEvent(s, message, from) {
   if (!s.isHost) return deliverEvent(s, message);
   const peer = s.peers.get(from);
-  if (!peer) return;
-  deliverEvent(s, message);
-  queueEvent(s, message, from);
+  if (!peer || !peer.live) return;
+  const relayed = acceptPeerEvent(s, message, peer.playerId);
+  if (relayed) queueEvent(s, relayed, from);
 }
 
 /** @param {any} s @param {any} message @param {string} _from @param {number} tick */
@@ -112,8 +124,13 @@ function onSnap(s, message, _from, tick) {
   if (message.index + 1 === message.count) s.joined = true;
 }
 
-/** @param {any} s */
-function onBye(s) {
+/** @param {any} s @param {any} _message @param {string} from */
+function onBye(s, _message, from) {
+  if (s.isHost) {
+    if (s.peers.has(from) && s.dropPeer) s.dropPeer(from);
+    return;
+  }
+  if (from !== s.hostPeerId) return;
   s.ended = true;
   s.reason = "host_left";
 }
@@ -133,6 +150,7 @@ function onInput(s, message, from) {
 
 /** @param {any} s @param {any} message @param {string} from */
 function onHint(s, message, from) {
+  if (!Number.isFinite(message.x) || !Number.isFinite(message.y)) return;
   const peer = s.peers.get(from);
   if (peer) s.hints.set(peer.playerId, { x: message.x, y: message.y });
 }

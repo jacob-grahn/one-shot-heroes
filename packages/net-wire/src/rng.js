@@ -1,4 +1,4 @@
-/** Seeded RNG for the simulated network. A zero seed is remapped so the stream still moves. */
+/** Seeded RNG shared by the session and the simulated network. A zero seed still moves. */
 
 /** @param {number} seed */
 export function mulberry32(seed) {
