@@ -123,6 +123,20 @@ jobs:
           CHROME: /usr/local/bin/google-chrome-ci
         run: npm test
 
+  net:
+    name: net
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install dependencies
+        uses: ./.github/actions/npm-ci
+      - name: Net tests
+        run: npm run test:net
+      - name: Encode benchmark
+        run: npm run bench:net
+
   gitleaks:
     name: gitleaks
     runs-on: ubuntu-24.04

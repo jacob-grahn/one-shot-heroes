@@ -11,5 +11,10 @@
     "skipLibCheck": true,
     "types": []
   },
-  "include": ["apps/editor/src/**/*.js", "packages/*/src/**/*.js"]
+  "include": [
+    "apps/editor/src/**/*.js",
+    "packages/*/src/**/*.js",
+    "packages/*/test/**/*.js",
+    "types/node-test.d.ts"
+  ]
 }
