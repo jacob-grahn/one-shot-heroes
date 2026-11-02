@@ -73,6 +73,12 @@ export function checkRecord(fields, obj, partial) {
   return checkRecordAt(fields, obj, partial, 0);
 }
 
+/** Name of the first field that fails the schema, or "" when the record is valid. */
+export function fieldIssue(fields, obj) {
+  if (!obj || typeof obj !== "object" || Array.isArray(obj)) return "payload";
+  return issueAt(fields, /** @type {Record<string, unknown>} */ (obj), 0);
+}
+
 /** @param {{ name: string, type: string }[]} fields @param {unknown} obj @param {boolean} partial @param {number} depth */
 function checkRecordAt(fields, obj, partial, depth) {
   if (!obj || typeof obj !== "object" || Array.isArray(obj)) return false;
@@ -80,6 +86,25 @@ function checkRecordAt(fields, obj, partial, depth) {
   if (!keysOk(fields, rec, depth)) return false;
   if (partial) return true;
   return fields.every((f) => Object.prototype.hasOwnProperty.call(rec, f.name));
+}
+
+/** @param {{ name: string, type: string }[]} fields @param {Record<string, unknown>} rec @param {number} depth */
+function issueAt(fields, rec, depth) {
+  for (const key of Object.keys(rec)) {
+    if (BAD_KEYS.has(key)) return key;
+    const field = fields.find((item) => item.name === key);
+    if (!field) return key;
+    const nested = valueIssue(field, rec[key], depth);
+    if (nested) return nested;
+  }
+  const missing = fields.find((item) => !Object.prototype.hasOwnProperty.call(rec, item.name));
+  return missing ? missing.name : "";
+}
+
+/** @param {Record<string, any>} field @param {unknown} value @param {number} depth */
+function valueIssue(field, value, depth) {
+  if (checkValue(field, value, depth)) return "";
+  return field.name;
 }
 
 /** @param {{ name: string, type: string }[]} fields @param {Record<string, unknown>} rec @param {number} depth */

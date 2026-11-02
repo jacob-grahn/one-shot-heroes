@@ -22,7 +22,8 @@ export const CAPS = Object.freeze({
   bytesPerSecond: 64 * 1024,
   // Same default as defineManifest.maxEntities. Pass manifest to createMediator to copy it.
   maxEntities: 400,
-  spawnPerSecond: 120,
+  // Sustained rate. A single tick may burst up to maxEntities.
+  spawnPerSecond: 30,
   maxKeys: 16,
   maxString: 128,
   maxName: 32,

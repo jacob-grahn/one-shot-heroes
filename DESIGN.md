@@ -64,11 +64,11 @@ Every value below is the default in `defineManifest` or `CAPS`. Pass a different
 | host leave             | the session ends                      | bye, or the host peer leaving |
 | events                 | reliable `net.emit` / `net.on`        | not replayed to late joiners  |
 | bytes/s                | 64 KiB/s per peer, per direction      | `CAPS.bytesPerSecond`         |
-| spawn rate             | 30/s                                  | `CAPS.spawnPerSecond`         |
+| spawn rate             | 30/s after a burst of maxEntities     | `CAPS.spawnPerSecond`         |
 | keys per custom object | 16                                    | `CAPS.maxKeys`                |
-| string length          | 128                                   | `CAPS.maxString`              |
+| string length          | manifest string max, else 128         | `CAPS.maxString`              |
 | nesting                | 4                                     | `CAPS.maxDepth`               |
-| late-join snapshot     | 64 KiB                                | `CAPS.maxSnapshotBytes`       |
+| late-join snapshot     | 64 KiB per packet, chunked            | `CAPS.maxSnapshotBytes`       |
 | join rate              | 8/s per peer                          | `CAPS.joinPerSecond`          |
 | event name             | 32 characters                         | `CAPS.maxName`                |
 | event payload          | 1024 bytes                            | `CAPS.maxEventBytes`          |

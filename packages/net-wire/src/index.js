@@ -3,7 +3,7 @@
 export { PROTOCOL, HEADER_BYTES, MAX_MESSAGES, LIMITS, BAD_KEYS, MSG } from "./defaults.js";
 export { WireError } from "./error.js";
 export { defineManifest } from "./manifest.js";
-export { checkRecord, checkValue } from "./schema.js";
+export { checkRecord, checkValue, fieldIssue } from "./schema.js";
 export { encodePacket, decodePacket } from "./packet.js";
 export {
   quantize,

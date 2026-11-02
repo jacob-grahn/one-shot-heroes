@@ -8,7 +8,9 @@ import { createLink } from "./peer.js";
 import { renderFrame } from "./render.js";
 import {
   announce,
+  assertWelcome,
   flushReliable,
+  rejectPeer,
   sendBye,
   sendClient,
   sendDirect,
@@ -18,6 +20,7 @@ import {
 } from "./relay.js";
 import { refreshSlots, sendDirty } from "./state-send.js";
 import { mulberry32 } from "./rng.js";
+import { finish, fireEnd, fireJoin } from "./lifecycle.js";
 import { PROTOCOL, canon, decodePacket, defineManifest, quantize } from "./wire.js";
 import { createWorld } from "./world.js";
 
@@ -74,6 +77,7 @@ function blank(options) {
     inputLog: new Map(),
     listeners: new Map(),
     seen: new Map(),
+    cursors: new Map(),
     eventSeq: 0,
     versions: new Map(),
     shown: new Map(),
@@ -86,13 +90,22 @@ function blank(options) {
     sink: null,
     stats: freshStats(),
   };
-  s.dropPeer = (peerId) => leave(s, peerId);
+  wireSession(s);
   s.rng = mulberry32(s.seed);
   s.est = () => (s.isHost ? s.shownTick : s.lastHostTick + (s.steps - s.lastHostAt));
   s.clockTick = () => (s.isHost && s.inUpdate ? s.tick : s.est());
-  if (s.isHost) s.players.push({ id: playerId, host: true });
   if (!s.isHost && !s.hostPeerId) throw new Error("client needs hostPeerId");
   return s;
+}
+
+/** @param {any} s */
+function wireSession(s) {
+  if (s.isHost) s.players.push({ id: s.playerId, host: true });
+  assertWelcome(s);
+  s.dropPeer = (peerId) => leave(s, peerId, true);
+  s.releasePeer = (peerId) => leave(s, peerId, false);
+  s.fireJoin = (info) => fireJoin(s, info);
+  s.fireEnd = () => fireEnd(s);
 }
 
 /** @param {any} s @param {Record<string, any>} options */
@@ -122,9 +135,8 @@ function takeId(s) {
 /** @param {any} s */
 function exhaustIds(s) {
   if (s.ended) return;
-  s.ended = true;
-  s.reason = "ids";
   sendBye(s);
+  finish(s, "ids");
 }
 
 function freshStats() {
@@ -135,6 +147,7 @@ function freshStats() {
     reliableDrops: 0,
     skipped: 0,
     customReverted: 0,
+    updateErrors: 0,
     sends: [],
     phases: { diff: 0, grid: 0, priority: 0, encode: 0, alloc: 0, other: 0 },
   };
@@ -192,14 +205,14 @@ function listen(s) {
 }
 
 /** @param {any} s @param {string} peerId */
-function leave(s, peerId) {
+function leave(s, peerId, tell) {
   if (!s.isHost && peerId === s.hostPeerId) {
-    s.ended = true;
-    s.reason = "host_left";
+    finish(s, "host_left");
     return;
   }
   const peer = s.peers.get(peerId);
   if (!peer) return;
+  if (tell) rejectPeer(s, peerId, 4);
   s.peers.delete(peerId);
   s.players = s.players.filter((player) => player.id !== peer.playerId);
   s.inputLog.delete(peer.playerId);
@@ -207,8 +220,9 @@ function leave(s, peerId) {
   s.focus.delete(peer.playerId);
   s.seen.delete(peer.playerId);
   s.epochs.delete(peer.playerId);
-  forget(s, peerId);
+  if (tell) forget(s, peerId);
   announce(s);
+  fireEnd(s);
 }
 
 /** @param {any} s @param {string} peerId */
@@ -263,15 +277,20 @@ function facade(s) {
 
 /** @param {any} s */
 function step(s) {
-  if (s.ended) return;
+  if (s.ended) {
+    fireEnd(s);
+    return;
+  }
   if (s.isHost) stepHost(s);
   else stepClient(s);
+  fireEnd(s);
 }
 
 /** @param {any} s */
 function stepHost(s) {
   const t = performance.now();
   drain(s);
+  sweepSilent(s);
   rememberLocal(s);
   const prev = noteAnims(s);
   runUpdate(s);
@@ -290,12 +309,22 @@ function runUpdate(s) {
   try {
     s.game.update(1 / s.manifest.tickHz, inputsFor(s), s.world, s.net);
   } catch (err) {
-    if (!customCap(err)) throw err;
-    s.stats.customReverted += 1;
-    warnPartial(s);
+    if (customCap(err)) {
+      s.stats.customReverted += 1;
+      warnPartial(s);
+    } else reportUpdate(s, err);
   } finally {
     s.inUpdate = false;
   }
+}
+
+/** @param {any} s @param {unknown} err */
+function reportUpdate(s, err) {
+  s.stats.updateErrors = (s.stats.updateErrors || 0) + 1;
+  const message = err instanceof Error ? err.message : String(err);
+  const warn = s.game && s.game.warn;
+  if (s.dev && typeof warn === "function") warn("update failed: " + message);
+  else if (s.dev) console.warn("update failed: " + message);
 }
 
 /** The oversize write is reverted. Earlier edits in the tick stay, and dev games are told. */
@@ -332,8 +361,17 @@ function close(s) {
       for (const peerId of [...s.peers.keys()]) forget(s, peerId);
     } else sendDirect(s, { type: "bye" });
   }
-  s.ended = true;
-  if (!s.reason) s.reason = "close";
+  finish(s, s.reason || "close");
+}
+
+/** A joined peer that sends nothing for two seconds is dropped and told. */
+function sweepSilent(s) {
+  const limit = s.manifest.tickHz * 2;
+  for (const peer of [...s.peers.values()]) {
+    if (!peer.live) continue;
+    if (s.tick - (peer.lastHeard || 0) < limit) continue;
+    leave(s, peer.peerId, true);
+  }
 }
 
 /** @param {unknown} err */

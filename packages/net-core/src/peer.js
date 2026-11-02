@@ -17,6 +17,7 @@ export function createPeer(peerId, playerId) {
     seq: 0,
     recv: new Set(),
     recvMax: 0,
+    lastHeard: 0,
   };
 }
 

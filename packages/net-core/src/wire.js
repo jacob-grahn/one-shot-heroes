@@ -8,6 +8,8 @@ export {
   applyState,
   canon,
   checkRecord,
+  checkValue,
+  fieldIssue,
   cloneState,
   createSink,
   customEqual,

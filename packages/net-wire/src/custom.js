@@ -276,13 +276,25 @@ function adopt(obj, bytes) {
   const hash = fnvBytes(bytes);
   const known = byHash.get(hash);
   if (known && known.len === bytes.length && sameBytes(known.bytes, bytes)) {
+    byHash.delete(hash);
+    byHash.set(hash, known);
     stamps.set(obj, known);
     return known;
   }
   const stamp = { gen: ++genN, len: bytes.length, bytes };
   stamps.set(obj, stamp);
-  if (!known && bytes.length <= 1024 && byHash.size < 4096) byHash.set(hash, stamp);
+  if (!known && bytes.length <= 1024) rememberStamp(hash, stamp);
   return stamp;
+}
+
+/** @param {number} hash @param {{ gen: number, len: number, bytes: Uint8Array | null }} stamp */
+function rememberStamp(hash, stamp) {
+  if (byHash.has(hash)) byHash.delete(hash);
+  byHash.set(hash, stamp);
+  while (byHash.size > 4096) {
+    const oldest = byHash.keys().next().value;
+    byHash.delete(oldest);
+  }
 }
 
 /** @param {unknown} obj */

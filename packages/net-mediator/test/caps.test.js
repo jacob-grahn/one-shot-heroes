@@ -84,9 +84,26 @@ test("64 rejected hellos do not block an honest peer", () => {
       reliable: true,
     });
   }
-  const early = mediator.inspect(hello(99), { peer: "honest", dir: "in", reliable: true });
-  assert.equal(early.code, "lanes");
-  now = 1500;
+  const honest = mediator.inspect(hello(99), { peer: "honest", dir: "in", reliable: true });
+  assert.equal(honest.ok, true);
+});
+
+test("hellos resent inside the grace period cannot starve a new peer", () => {
+  let now = 0;
+  const mediator = createMediator({ now: () => now });
+  for (let i = 0; i < 64; i++) {
+    assert.equal(
+      mediator.inspect(hello(i + 1), { peer: "bad" + i, dir: "in", reliable: true }).ok,
+      true,
+    );
+  }
+  now = 1400;
+  for (let i = 0; i < 64; i++) {
+    assert.equal(
+      mediator.inspect(hello(i + 1), { peer: "bad" + i, dir: "in", reliable: true }).ok,
+      true,
+    );
+  }
   const honest = mediator.inspect(hello(99), { peer: "honest", dir: "in", reliable: true });
   assert.equal(honest.ok, true);
 });
@@ -217,14 +234,17 @@ function fat() {
 
 function spawnRate() {
   const mediator = createMediator({
-    caps: { spawnPerSecond: 30, maxEntities: 1000 },
+    caps: { spawnPerSecond: 30, maxEntities: 40 },
     now: () => 0,
   });
   let code = "";
-  for (let id = 1; id <= 31; id++) {
+  for (let id = 1; id <= 40; id++) {
     const result = mediator.inspect(spawn(id, {}));
     if (!result.ok) code = result.code;
   }
+  mediator.inspect(despawn(1));
+  const extra = mediator.inspect(spawn(41, {}));
+  if (!extra.ok) code = extra.code;
   return code;
 }
 

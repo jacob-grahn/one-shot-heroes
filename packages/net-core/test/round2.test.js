@@ -252,13 +252,15 @@ test("dropPeer forgets the mediator lane so a later peer can join", () => {
   }
   assert.equal(client.joined, true);
   for (let i = 0; i < 63; i++) {
-    const result = mediator.inspect(
-      encodePacket({ tick: 1, flags: 1 }, [
-        { type: "hello", playerId: i + 2, proto: 2, hash: "abcd" },
-      ]),
-      { peer: "x" + i, dir: "in", reliable: true },
-    );
-    assert.equal(result.ok, true);
+    const peer = "x" + i;
+    const hello = encodePacket({ tick: 1, flags: 1 }, [
+      { type: "hello", playerId: i + 2, proto: 2, hash: "abcd" },
+    ]);
+    const welcome = encodePacket({ tick: 1 }, [
+      { type: "welcome", you: i + 2, seed: 1, hostId: 0, players: [0, i + 2] },
+    ]);
+    assert.equal(mediator.inspect(hello, { peer, dir: "in", reliable: true }).ok, true);
+    assert.equal(mediator.inspect(welcome, { peer, dir: "out", reliable: true }).ok, true);
   }
   const blocked = mediator.inspect(
     encodePacket({ tick: 1, flags: 1 }, [{ type: "hello", playerId: 200, proto: 2, hash: "abcd" }]),

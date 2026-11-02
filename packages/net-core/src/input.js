@@ -1,18 +1,17 @@
 /** Input history, redundancy, and manifest checks. Invalid samples never reach update. */
 
-import { checkRecord } from "./wire.js";
+import { fieldIssue } from "./wire.js";
 
 /** @param {any} s */
 export function rememberLocal(s) {
   if (!s.pendingLocal) return;
-  if (checkRecord(s.manifest.inputs, s.pendingLocal, false))
-    log(s, s.playerId).set(s.tick, s.pendingLocal);
+  if (inputOk(s, s.pendingLocal)) log(s, s.playerId).set(s.tick, s.pendingLocal);
   s.pendingLocal = null;
 }
 
 /** @param {any} s @param {number} playerId @param {{ tick: number, values: any }} sample */
 export function rememberRemote(s, playerId, sample) {
-  if (!inWindow(s, sample.tick) || !checkRecord(s.manifest.inputs, sample.values, false)) return;
+  if (!inWindow(s, sample.tick) || !inputOk(s, sample.values)) return;
   const bag = log(s, playerId);
   const cap = behindOf(s) + LEAD + 2;
   if (!bag.has(sample.tick) && bag.size >= cap) return;
@@ -59,6 +58,15 @@ function newest(bag, tick, window) {
   return best;
 }
 
+/** @param {any} s @param {any} values */
+function inputOk(s, values) {
+  const issue = fieldIssue(s.manifest.inputs, values);
+  if (!issue) return true;
+  const warn = s.game && s.game.warn;
+  if (s.dev && typeof warn === "function") warn("rejected input field " + issue);
+  return false;
+}
+
 /** @param {any} s @param {number} playerId */
 function log(s, playerId) {
   let bag = s.inputLog.get(playerId);
@@ -71,7 +79,7 @@ function log(s, playerId) {
 
 /** @param {any} s @param {number} stamp @param {any} values */
 export function pushHist(s, stamp, values) {
-  if (!checkRecord(s.manifest.inputs, values, false)) return;
+  if (!inputOk(s, values)) return;
   const found = s.inputHist.find((sample) => sample.tick === stamp);
   if (found) found.values = values;
   else s.inputHist.push({ tick: stamp, values });

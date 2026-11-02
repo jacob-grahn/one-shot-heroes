@@ -3,6 +3,7 @@
 import { ackHeader, nextSeq, rememberSent } from "./ack.js";
 import { takeBatches } from "./pack.js";
 import { createPeer } from "./peer.js";
+import { cursorList } from "./events.js";
 import { MAX_MESSAGES, cloneState, defaultState, encodePacket, quantize } from "./wire.js";
 
 /** @param {any} s @param {string} to @param {Uint8Array} bytes @param {{ reliable?: boolean, ids?: number[] }} [opts] */
@@ -89,9 +90,11 @@ export function acceptPeer(s, from, playerId) {
   s.peers.set(from, peer);
   s.players.push({ id: playerId, host: false });
   const records = baseline(s, peer);
+  peer.lastHeard = s.tick;
   peer.queue.push(welcomeMessage(s, playerId));
   for (const snap of snapMessages(s, records)) peer.queue.push(snap);
   peer.live = true;
+  if (s.fireJoin) s.fireJoin({ playerId });
   for (const other of s.peers.values()) {
     if (other !== peer && other.live) other.queue.push(welcomeMessage(s, other.playerId));
   }
@@ -114,6 +117,21 @@ function baseline(s, peer) {
   return records;
 }
 
+/** @param {any} s */
+export function assertWelcome(s) {
+  const players = [];
+  const cursors = [];
+  for (let i = 0; i < s.manifest.maxPlayers; i++) {
+    players.push(i);
+    cursors.push({ origin: i, epoch: 1, next: 1 });
+  }
+  const bytes = encodePacket({ tick: 0 }, [
+    { type: "welcome", you: 1, seed: 1, hostId: 0, players, cursors },
+  ]).length;
+  if (bytes <= s.manifest.budget) return;
+  throw new Error("budget " + s.manifest.budget + " is below the welcome size " + bytes);
+}
+
 /** @param {any} s @param {number} playerId */
 function welcomeMessage(s, playerId) {
   return {
@@ -122,6 +140,7 @@ function welcomeMessage(s, playerId) {
     seed: s.seed >>> 0,
     hostId: s.playerId,
     players: s.players.map((player) => player.id),
+    cursors: cursorList(s),
   };
 }
 

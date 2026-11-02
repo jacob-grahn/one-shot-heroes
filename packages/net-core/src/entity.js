@@ -1,6 +1,15 @@
 /** Plain entity records. Custom writes mark the entity dirty; the tick snapshots only those. */
 
-import { EMPTY, customStamp, isUserText, plainClone, sealBytes, stampSnapshot, clearSeal, valueBytes } from "./wire.js";
+import {
+  EMPTY,
+  customStamp,
+  isUserText,
+  plainClone,
+  sealBytes,
+  stampSnapshot,
+  clearSeal,
+  valueBytes,
+} from "./wire.js";
 
 const BAD = new Set(["__proto__", "constructor", "prototype"]);
 const CAP = 1024;
@@ -109,6 +118,15 @@ function watch(entity, box, root) {
     deleteProperty(target, key) {
       return dropKey(scope, target, key);
     },
+    defineProperty(target, key, desc) {
+      return defineKey(scope, target, key, desc);
+    },
+    setPrototypeOf() {
+      return false;
+    },
+    preventExtensions() {
+      return false;
+    },
   });
   views.set(box, view);
   return view;
@@ -147,6 +165,12 @@ function restoreKey(target, key, prior) {
   if (prior.len >= 0) target.length = prior.len;
 }
 
+/** @param {{ entity: any, root: Record<string, unknown> }} scope @param {Record<string, unknown>} target @param {string | symbol} key @param {PropertyDescriptor} desc */
+function defineKey(scope, target, key, desc) {
+  if (!desc || !Object.prototype.hasOwnProperty.call(desc, "value")) return false;
+  return writeKey(scope, target, key, desc.value);
+}
+
 /** @param {{ entity: any, root: Record<string, unknown> }} scope @param {Record<string, unknown>} target @param {string | symbol} key */
 function dropKey(scope, target, key) {
   if (typeof key !== "string") return false;
@@ -172,7 +196,7 @@ function storeCustom(src) {
   const out = Object.create(null);
   const obj = src && typeof src === "object" ? /** @type {Record<string, unknown>} */ (src) : {};
   for (const key of Object.keys(obj)) {
-    if (BAD.has(key)) throw new Error("bad custom key");
+    if (BAD.has(key)) throw new Error("bad custom key " + key);
     out[key] = keep(obj[key]);
   }
   return out;

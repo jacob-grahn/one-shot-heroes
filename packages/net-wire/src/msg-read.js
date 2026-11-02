@@ -30,7 +30,10 @@ function readWelcome(r) {
   const n = r.u8();
   const players = [];
   for (let i = 0; i < n; i++) players.push(r.u8());
-  return { you, seed, hostId, players };
+  const cursors = [];
+  const count = r.u8();
+  for (let i = 0; i < count; i++) cursors.push({ origin: r.u8(), epoch: r.u16(), next: r.u32() });
+  return { you, seed, hostId, players, cursors };
 }
 
 function readReject(r) {

@@ -10,6 +10,7 @@ import {
   MSG,
   PROTOCOL,
   createSink,
+  checkValue,
   customDeltaLen,
   customStamp,
   diffMask,
@@ -52,6 +53,27 @@ function keepCustom(s, slot, entity, prev) {
   }
   if (verdict === "reverted") s.stats.customReverted += 1;
   slot.custom = acceptedCustom(entity);
+  reviewCustom(s, entity);
+}
+
+/** @param {any} s @param {any} entity */
+function reviewCustom(s, entity) {
+  if (!s.dev || !entity || entity.local) return;
+  const warn = s.game && s.game.warn;
+  if (typeof warn !== "function") return;
+  const fields = s.manifest.custom || [];
+  const custom = entity.custom || {};
+  for (const key of Object.keys(custom)) warnField(warn, fields, key, custom[key]);
+}
+
+/** @param {(message: string) => void} warn @param {any[]} fields @param {string} key @param {unknown} value */
+function warnField(warn, fields, key, value) {
+  const field = fields.find((item) => item.name === key);
+  if (!field) {
+    warn("undeclared custom key " + key);
+    return;
+  }
+  if (!checkValue(field, value, 0)) warn("custom field " + key + " is outside the schema");
 }
 
 /** @param {any} s @param {any} peer */

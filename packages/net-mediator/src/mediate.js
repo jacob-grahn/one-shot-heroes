@@ -101,7 +101,7 @@ function rates(st, bag) {
   if (live == null) return block(st, ctx, "entities");
   draft.live = live;
   const fresh = freshIds(st, draft);
-  if (fresh.length && !charge(side.spawns, now, fresh.length, st.caps.spawnPerSecond))
+  if (fresh.length && !takeSpawns(st, side, now, fresh.length))
     return block(st, ctx, "spawn_rate");
   draft.fresh = fresh;
   return null;
@@ -233,22 +233,55 @@ function resolveCaps(opts) {
   if (opts.caps && opts.caps.maxEntities != null && opts.caps.maxEntities !== fromManifest)
     throw new Error("mediator maxEntities does not match the manifest");
   caps.maxEntities = fromManifest;
+  const declared = stringMax(opts.manifest);
+  if (declared > caps.maxString) caps.maxString = declared;
   return caps;
 }
 
-/** Drop the oldest pending lane whose hello grace has ended. Joined peers stay. */
+/** @param {any} manifest */
+function stringMax(manifest) {
+  let n = 0;
+  visit(manifest.custom);
+  visit(manifest.inputs);
+  for (const event of manifest.events || []) visit(event.fields);
+  return n;
+
+  /** @param {any[] | undefined} fields */
+  function visit(fields) {
+    for (const field of fields || []) {
+      if (field.type === "string" && field.max > n) n = field.max;
+      if (field.item) visit([field.item]);
+      if (field.fields) visit(field.fields);
+    }
+  }
+}
+
+/** Evict the oldest pending lane, even inside its grace, so a hello flood cannot fill the table. */
 function evictLane(st) {
-  const now = st.now();
   let oldest = "";
   let at = Infinity;
   for (const [peer, row] of st.lanes) {
-    if (st.joined.has(peer) || now - row.at < PENDING_MS) continue;
+    if (st.joined.has(peer)) continue;
     if (row.at < at) {
       at = row.at;
       oldest = peer;
     }
   }
   if (oldest) forgetPeer(st, oldest);
+}
+
+/** Burst of maxEntities, then refill at spawnPerSecond. One legal tick can fill the world. */
+function takeSpawns(st, side, now, n) {
+  const rate = st.caps.spawnPerSecond;
+  const burst = Math.max(st.caps.maxEntities, rate);
+  const bag = side.spawnBurst || (side.spawnBurst = { tokens: burst, at: now });
+  if (now > bag.at) {
+    bag.tokens = Math.min(burst, bag.tokens + ((now - bag.at) / 1000) * rate);
+    bag.at = now;
+  }
+  if (bag.tokens < n) return false;
+  bag.tokens -= n;
+  return true;
 }
 
 /** @param {any} st @param {string} peer */

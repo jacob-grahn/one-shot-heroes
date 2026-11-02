@@ -31,6 +31,13 @@ function writeWelcome(w, m) {
   w.u8(m.hostId);
   w.u8(m.players.length);
   for (const id of m.players) w.u8(id);
+  const cursors = m.cursors || [];
+  w.u8(cursors.length);
+  for (const cursor of cursors) {
+    w.u8(cursor.origin);
+    w.u16(cursor.epoch || 0);
+    w.u32(cursor.next >>> 0);
+  }
 }
 
 function writeReject(w, m) {

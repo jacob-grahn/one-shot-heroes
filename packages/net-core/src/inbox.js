@@ -2,7 +2,7 @@
 
 import { confirmSent, noteRecv } from "./ack.js";
 import { applyUpdate, beginSnap, dropEntity, installRecord } from "./apply.js";
-import { acceptPeerEvent, deliverEvent, queueEvent } from "./events.js";
+import { acceptPeerEvent, applyCursors, deliverEvent, queueEvent } from "./events.js";
 import { rememberRemote } from "./input.js";
 import { mulberry32 } from "./rng.js";
 import { acceptPeer, rejectPeer } from "./relay.js";
@@ -24,6 +24,7 @@ function dispatch(s, item) {
     packet.messages = hello;
   }
   const peer = s.isHost ? s.peers.get(item.from) : s.link;
+  if (s.isHost && s.peers.has(item.from)) heard(s, item.from);
   if (peer) confirmSent(peer, packet.ack, packet.ackBits);
   if (!s.isHost) noteTick(s, packet.tick);
   const ready = stateReady(s, packet);
@@ -84,7 +85,8 @@ const HANDLERS = {
 
 /** @param {any} s @param {any} message @param {string} from */
 function onHello(s, message, from) {
-  if (!s.isHost || s.ended || s.peers.has(from)) return;
+  if (!s.isHost || s.ended) return;
+  if (s.peers.has(from) && s.releasePeer) s.releasePeer(from);
   if (message.proto !== PROTOCOL) return rejectPeer(s, from, 1);
   if (message.hash !== s.manifest.hash) return rejectPeer(s, from, 2);
   if (s.players.some((player) => player.id === message.playerId)) return rejectPeer(s, from, 3);
@@ -101,13 +103,24 @@ function onWelcome(s, message) {
     s.haveSeed = true;
   }
   s.players = message.players.map((id) => ({ id, host: id === message.hostId }));
+  s.welcomeCursors = message.cursors || [];
+  applyCursors(s, s.welcomeCursors);
 }
 
 /** @param {any} s @param {any} message @param {string} from */
 function onReject(s, message, from) {
   if (s.isHost || from !== s.hostPeerId) return;
   s.ended = true;
-  s.reason = message.code === 2 ? "hash" : message.code === 1 ? "version" : "reject";
+  s.reason = reasonOf(message.code);
+  if (s.fireEnd) s.fireEnd();
+}
+
+/** @param {number} code */
+function reasonOf(code) {
+  if (code === 2) return "hash";
+  if (code === 1) return "version";
+  if (code === 4) return "dropped";
+  return "reject";
 }
 
 /** @param {any} s @param {any} message @param {string} _from @param {number} tick */
@@ -132,9 +145,20 @@ function onEvent(s, message, from) {
 /** @param {any} s @param {any} message @param {string} _from @param {number} tick */
 function onSnap(s, message, _from, tick) {
   if (s.isHost) return;
-  if (message.index === 0) beginSnap(s);
+  if (message.index === 0) {
+    beginSnap(s);
+    s.snapGot = new Set();
+    s.snapCount = message.count;
+    if (s.welcomeCursors) applyCursors(s, s.welcomeCursors);
+  }
+  if (!s.snapGot) s.snapGot = new Set();
+  s.snapGot.add(message.index);
   for (const rec of message.records) installRecord(s, rec, tick);
-  if (message.index + 1 === message.count) s.joined = true;
+  const count = message.count || s.snapCount || 0;
+  if (s.snapGot.size === count && count > 0 && !s.joined) {
+    s.joined = true;
+    if (s.fireJoin) s.fireJoin({ playerId: s.playerId });
+  }
 }
 
 /** @param {any} s @param {any} _message @param {string} from */
@@ -146,6 +170,13 @@ function onBye(s, _message, from) {
   if (from !== s.hostPeerId) return;
   s.ended = true;
   s.reason = "host_left";
+  if (s.fireEnd) s.fireEnd();
+}
+
+/** @param {any} s @param {string} from */
+function heard(s, from) {
+  const peer = s.peers.get(from);
+  if (peer) peer.lastHeard = s.tick;
 }
 
 /** @param {any} s @param {any} message @param {string} _from @param {number} tick */

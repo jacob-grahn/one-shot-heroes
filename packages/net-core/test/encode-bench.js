@@ -96,7 +96,8 @@ const game = {
     const next = flip ? ALT : TAG;
     for (const entity of world.query("mob")) {
       if (n % 10 < 3) entity.x += 0.25;
-      if (customMode === "100%" || (customMode === "30%" && n % 10 < 3)) entity.custom.tag = next;
+      if (customMode === "unique") entity.custom.tag = n + ":" + flip + ":" + TAG.slice(0, 120);
+      else if (customMode === "100%" || (customMode === "30%" && n % 10 < 3)) entity.custom.tag = next;
       n += 1;
     }
   },
@@ -121,7 +122,7 @@ function runBench() {
     if (row.ms > 8 || row.maxPacket > manifest.budget) throw new Error(row.line);
     return;
   }
-  const rows = [bench("still"), bench("30%"), bench("100%")];
+  const rows = [bench("still"), bench("30%"), bench("100%"), bench("unique")];
   for (const row of rows) console.log(row.line);
   const gated = rows[1];
   if (gated.ms > 8 || gated.maxPacket > manifest.budget) throw new Error(gated.line);

@@ -72,12 +72,9 @@ function spawn(caps, draft, record) {
 
 /** @param {any} caps @param {any} draft @param {any} message @param {number} size */
 function snap(caps, draft, message, size) {
-  if (message.index === 0) {
-    draft.snapBytes = 0;
-    draft.snapReset = true;
-  }
-  draft.snapBytes += size;
-  if (draft.snapBytes > caps.maxSnapshotBytes) return "snapshot";
+  if (message.index === 0) draft.snapReset = true;
+  if (size > caps.maxSnapshotBytes) return "snapshot";
+  draft.snapBytes = size;
   if (message.total > caps.maxEntities) return "entities";
   draft.snapEntities = message.total;
   draft.snapDone = message.index + 1 === message.count;

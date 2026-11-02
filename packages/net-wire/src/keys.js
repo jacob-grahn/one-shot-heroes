@@ -13,7 +13,18 @@ export function assertKey(key) {
  * @param {string} text
  */
 export function userText(text) {
-  return { text: String(text), userContent: true };
+  const box = { text: String(text), userContent: true };
+  Object.defineProperty(box, "toString", {
+    value() {
+      return box.text;
+    },
+  });
+  Object.defineProperty(box, "valueOf", {
+    value() {
+      return box.text;
+    },
+  });
+  return box;
 }
 
 /** @param {unknown} v */

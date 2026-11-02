@@ -29,6 +29,12 @@ export function createNet(s) {
     on(name, fn) {
       onEvent(s, name, fn);
     },
+    onJoin(fn) {
+      (s.joiners = s.joiners || []).push(fn);
+    },
+    onEnd(fn) {
+      (s.enders = s.enders || []).push(fn);
+    },
     setFocus(playerId, x, y) {
       setFocus(s, playerId, x, y);
     },

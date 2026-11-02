@@ -1,6 +1,6 @@
 /** Reliable one-shot events. Peer relays are opt-in and deduped with a sliding window. */
 
-import { checkRecord, encodePacket, isUserText } from "./wire.js";
+import { encodePacket, fieldIssue, isUserText } from "./wire.js";
 
 const WINDOW = 64;
 
@@ -14,7 +14,8 @@ export function onEvent(s, name, fn) {
 /** @param {any} s @param {string} name @param {any} payload */
 export function emitEvent(s, name, payload) {
   const spec = specOf(s, name);
-  if (!spec || !checkRecord(spec.fields, payload, false)) throw new Error("bad event " + name);
+  const issue = !spec ? "name" : fieldIssue(spec.fields, payload);
+  if (issue) throw new Error("bad event " + name + " field " + issue);
   const message = {
     type: "event",
     id: (s.eventSeq += 1),
@@ -24,6 +25,7 @@ export function emitEvent(s, name, payload) {
     payload,
   };
   deliverEvent(s, message);
+  noteCursor(s, s.playerId, message.id, 0);
   if (s.isHost) queueEvent(s, message, "");
   else s.sendDirect(message);
 }
@@ -34,7 +36,11 @@ export function emitEvent(s, name, payload) {
  */
 export function acceptPeerEvent(s, message, playerId) {
   const spec = specOf(s, message.name);
-  if (!spec || !checkRecord(spec.fields, message.payload, false)) return null;
+  const issue = !spec ? "name" : fieldIssue(spec.fields, message.payload);
+  if (issue) {
+    warnIssue(s, "event " + message.name + " field " + issue);
+    return null;
+  }
   const clean = {
     type: "event",
     id: message.id >>> 0,
@@ -45,6 +51,7 @@ export function acceptPeerEvent(s, message, playerId) {
   };
   if (eventBytes(clean) > s.manifest.budget) return null;
   if (!deliverEvent(s, clean)) return null;
+  noteCursor(s, playerId, clean.id, clean.epoch);
   return spec.relay ? clean : null;
 }
 
@@ -67,19 +74,76 @@ export function deliverEvent(s, message) {
 /** @param {any} s @param {number} origin @param {number} epoch @param {number} id */
 function admit(s, origin, epoch, id) {
   if (!id) return false;
-  let slot = s.seen.get(origin);
-  if (!slot || slot.epoch !== epoch) {
-    slot = { epoch, next: 1, have: new Set() };
-    s.seen.set(origin, slot);
-  }
-  if (id < slot.next || id >= slot.next + WINDOW) return false;
-  if (slot.have.has(id)) return false;
+  const slot = slotFor(s, origin, epoch, id);
+  if (!s.isHost && id >= slot.next + WINDOW) slide(slot, id + 1 - WINDOW);
+  if (id < slot.next || id >= slot.next + WINDOW || slot.have.has(id)) return false;
   slot.have.add(id);
   while (slot.have.has(slot.next)) {
     slot.have.delete(slot.next);
     slot.next += 1;
   }
   return true;
+}
+
+/** @param {any} s @param {number} origin @param {number} epoch @param {number} id */
+function slotFor(s, origin, epoch, id) {
+  let slot = s.seen.get(origin);
+  if (slot && slot.epoch === epoch) return slot;
+  const seeded = cursorNext(s, origin, epoch);
+  slot = { epoch, next: seeded || id, have: new Set() };
+  s.seen.set(origin, slot);
+  return slot;
+}
+
+/** @param {any} s @param {number} origin @param {number} epoch */
+function cursorNext(s, origin, epoch) {
+  const cursor = s.cursors && s.cursors.get(origin);
+  if (!cursor || cursor.epoch !== epoch) return 0;
+  return cursor.next >>> 0;
+}
+
+/** @param {{ next: number, have: Set<number> }} slot @param {number} floor */
+function slide(slot, floor) {
+  const next = floor > 0 ? floor : 1;
+  for (const old of slot.have) if (old < next) slot.have.delete(old);
+  if (next > slot.next) slot.next = next;
+}
+
+/** @param {any} s @param {{ origin: number, epoch: number, next: number }[]} cursors */
+export function applyCursors(s, cursors) {
+  if (!s.cursors) s.cursors = new Map();
+  for (const cursor of cursors || []) {
+    const epoch = cursor.epoch >>> 0;
+    const next = cursor.next >>> 0;
+    s.cursors.set(cursor.origin, { epoch, next });
+    s.seen.set(cursor.origin, { epoch, next, have: new Set() });
+  }
+}
+
+/** @param {any} s */
+export function cursorList(s) {
+  const list = [];
+  if (s.cursors) {
+    for (const [origin, cursor] of s.cursors) list.push({ origin, epoch: cursor.epoch, next: cursor.next });
+  }
+  if (!s.cursors || !s.cursors.has(s.playerId))
+    list.push({ origin: s.playerId, epoch: 0, next: (s.eventSeq || 0) + 1 });
+  return list;
+}
+
+/** @param {any} s @param {number} origin @param {number} id @param {number} epoch */
+export function noteCursor(s, origin, id, epoch) {
+  if (!s.cursors) s.cursors = new Map();
+  const next = (id >>> 0) + 1;
+  const prev = s.cursors.get(origin);
+  if (!prev || prev.epoch !== (epoch >>> 0) || next > prev.next)
+    s.cursors.set(origin, { epoch: epoch >>> 0, next });
+}
+
+/** @param {any} s @param {string} message */
+function warnIssue(s, message) {
+  const warn = s.game && s.game.warn;
+  if (s.dev && typeof warn === "function") warn(message);
 }
 
 /** @param {any} message */
