@@ -39,7 +39,7 @@ test("mutated valid packets do not throw or pollute", () => {
   });
   const seeds = [
     encodePacket({ tick: 5, flags: 1 }, [
-      { type: "hello", playerId: 1, proto: 2, hash: manifest.hash },
+      { type: "hello", playerId: 1, proto: 3, hash: manifest.hash },
     ]),
     encodePacket({ tick: 5, flags: 1 }, [
       { type: "event", id: 3, origin: 1, name: "chat", payload: { msg: "hi" } },

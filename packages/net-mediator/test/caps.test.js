@@ -195,7 +195,7 @@ function snap(total) {
 
 /** @param {number} id */
 function hello(id) {
-  return encodePacket({ tick: 1 }, [{ type: "hello", playerId: id, proto: 2, hash: "abcd" }]);
+  return encodePacket({ tick: 1 }, [{ type: "hello", playerId: id, proto: 3, hash: "abcd" }]);
 }
 
 /** @param {number} id */

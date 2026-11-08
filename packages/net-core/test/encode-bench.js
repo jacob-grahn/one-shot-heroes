@@ -97,7 +97,8 @@ const game = {
     for (const entity of world.query("mob")) {
       if (n % 10 < 3) entity.x += 0.25;
       if (customMode === "unique") entity.custom.tag = n + ":" + flip + ":" + TAG.slice(0, 120);
-      else if (customMode === "100%" || (customMode === "30%" && n % 10 < 3)) entity.custom.tag = next;
+      else if (customMode === "100%" || (customMode === "30%" && n % 10 < 3))
+        entity.custom.tag = next;
       n += 1;
     }
   },
@@ -126,6 +127,9 @@ function runBench() {
   for (const row of rows) console.log(row.line);
   const gated = rows[1];
   if (gated.ms > 8 || gated.maxPacket > manifest.budget) throw new Error(gated.line);
+  const unique = rows[3];
+  if (unique && (unique.ms > 14 || unique.maxPacket > manifest.budget))
+    throw new Error(unique.line);
   for (const row of rows) {
     if (row.maxPacket > manifest.budget) throw new Error(row.line);
   }

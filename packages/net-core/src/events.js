@@ -124,7 +124,8 @@ export function applyCursors(s, cursors) {
 export function cursorList(s) {
   const list = [];
   if (s.cursors) {
-    for (const [origin, cursor] of s.cursors) list.push({ origin, epoch: cursor.epoch, next: cursor.next });
+    for (const [origin, cursor] of s.cursors)
+      list.push({ origin, epoch: cursor.epoch, next: cursor.next });
   }
   if (!s.cursors || !s.cursors.has(s.playerId))
     list.push({ origin: s.playerId, epoch: 0, next: (s.eventSeq || 0) + 1 });
@@ -136,7 +137,7 @@ export function noteCursor(s, origin, id, epoch) {
   if (!s.cursors) s.cursors = new Map();
   const next = (id >>> 0) + 1;
   const prev = s.cursors.get(origin);
-  if (!prev || prev.epoch !== (epoch >>> 0) || next > prev.next)
+  if (!prev || prev.epoch !== epoch >>> 0 || next > prev.next)
     s.cursors.set(origin, { epoch: epoch >>> 0, next });
 }
 

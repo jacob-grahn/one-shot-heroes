@@ -49,6 +49,7 @@ Every value below is the default in `defineManifest` or `CAPS`. Pass a different
 | networked entities     | 400; spawn past that throws           | `manifest.maxEntities`        |
 | who runs logic         | the host                              | no client prediction in v1    |
 | sim rate               | 20 Hz                                 | `manifest.tickHz` (1..60)     |
+| peer silence           | 12000 ms of host time                 | `manifest.silenceMs`          |
 | interpolation delay    | 100 ms                                | `manifest.interpMs`           |
 | teleport snap          | 48 world units                        | `manifest.teleport`           |
 | unreliable byte budget | 1200 bytes                            | `manifest.budget`             |
@@ -100,7 +101,9 @@ Topology is a star. Clients talk only to the host. The wrapper tells a client th
 
 Reliable messages: handshake (`protocol` + game hash), spawn, despawn, `net.emit` events, the late-join snapshot, welcome/reject/bye. Unreliable: entity state, inputs, focus hints. Inputs repeat the last few ticks. The host applies a tick's input once, after checking it against the manifest. A bad sample is dropped. The host keeps samples in `[tick - max(inputRedundancy, tickHz * 2), tick + 4]`, so a round trip longer than the repeated history still applies, up to about two seconds. A sample older than that is dropped.
 
-The handshake compares `manifest.hash` (FNV-1a of the canonical manifest) and protocol version 2. A mismatch rejects the peer. If the host leaves, clients end with `host_left`.
+The handshake compares `manifest.hash` (FNV-1a of the canonical manifest) and protocol version 3. A protocol mismatch ends that join with reason `version` on the client and drops that peer on the host. A hash mismatch ends it with reason `hash`. Reject codes are 1 version, 2 hash, 3 seat, 4 dropped, and 5 full. If the host leaves, clients end with `host_left`.
+
+The host drops a joined peer that has sent no packet for `manifest.silenceMs` of host time (`tick / tickHz`), default 12000 ms. The clock is the host tick, not the wall clock. A packet still in flight counts when it arrives, so a slow link is silent only while nothing is delivered. A blackout longer than `silenceMs` ends the peer with reason `dropped`. The default therefore keeps a client through a 3 s or 8 s blackout and drops a 15 s blackout unless the manifest sets a longer `silenceMs`. After the drop, the same peer id may hello again.
 
 ## Change tracking and deltas
 
@@ -156,7 +159,9 @@ const mediator = createMediator({
 
 `host.dropPeer` removes that peer. It also calls `transport.forget(peerId)` when the wrapped transport provides it, and `close` sends `bye` (from a client as well as the host) so the mediator drops that peer from `joined` and deletes its lane. A hello occupies a lane but does not count as joined. The peer is joined only when the host sends `welcome`. A hello that is not accepted is evicted after 1.5 seconds, so a run of rejected hellos cannot hold the 64 lanes the way a joined peer can. A lane with no traffic for 10 seconds is evicted even if the peer had joined. When every lane is still in use, a new peer id is refused and the violation `lanes` is recorded. Fan-out for relayed events counts only peers still in `joined`. Pass the manifest to `createMediator({ manifest })` so `caps.maxEntities` is taken from `manifest.maxEntities`. An explicit `caps.maxEntities` that disagrees with the manifest throws at startup. Unreliable traffic over the cap is dropped and resent by the normal ack loop. `inspect(bytes)` is the same check. The walk also rejects event names longer than `maxName` and event payloads over `maxEventBytes`.
 
-Protocol version is 2.
+Protocol version is 3.
+
+`stats.staleness` is the oldest dirty entity, in host ticks, waiting on an ack. If it climbs, call `net.setFocus(playerId, x, y)` so nearby entities win the bandwidth. The unique-custom bench row is a stress case and is gated at 14 ms, not the 8 ms gate used for the 30% row.
 
 `@osh/net-core/src/wire.js` is the only module that imports `@osh/net-wire`. The codec would otherwise be imported from enough call sites to trip the fan-in gate. The file is a barrel on purpose.
 

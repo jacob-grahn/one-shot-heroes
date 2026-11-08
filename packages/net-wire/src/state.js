@@ -3,7 +3,7 @@
 import { encodeUtf8 } from "./bin.js";
 import { EMPTY, canon, cloneCustom, customStamp, encodeOps, plainClone } from "./custom.js";
 import { F_ANIM, F_CUSTOM, F_ROT, F_SCALE, F_START, F_X, F_Y } from "./defaults.js";
-import { userText } from "./keys.js";
+import { isUserText, userText } from "./keys.js";
 import { fromU16, toU16, wrapAngle } from "./quant.js";
 
 /** @param {{ posMin: number, posMax: number, scaleMin: number, scaleMax: number }} q */
@@ -229,6 +229,7 @@ function toUser(custom) {
 /** @param {unknown} v */
 function toUserVal(v) {
   if (typeof v === "string") return userText(v);
+  if (isUserText(v)) return userText(/** @type {{ text: string }} */ (v).text);
   if (Array.isArray(v)) return v.map(toUserVal);
   if (v && typeof v === "object") return toUser(/** @type {Record<string, unknown>} */ (v));
   return v;

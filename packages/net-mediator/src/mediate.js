@@ -42,6 +42,7 @@ export function createMediator(options) {
 function inspect(st, bytes, meta) {
   const ctx = context(meta);
   if (!(bytes instanceof Uint8Array)) return block(st, ctx, "malformed");
+  if (bytes.length > CAPS.maxSnapshotBytes) return block(st, ctx, "budget");
   const packet = decodePacket(bytes);
   if (packet.ok === false)
     return block(st, ctx, packet.error === "bad_key" ? "bad_key" : "malformed");
@@ -101,8 +102,7 @@ function rates(st, bag) {
   if (live == null) return block(st, ctx, "entities");
   draft.live = live;
   const fresh = freshIds(st, draft);
-  if (fresh.length && !takeSpawns(st, side, now, fresh.length))
-    return block(st, ctx, "spawn_rate");
+  if (fresh.length && !takeSpawns(st, side, now, fresh.length)) return block(st, ctx, "spawn_rate");
   draft.fresh = fresh;
   return null;
 }

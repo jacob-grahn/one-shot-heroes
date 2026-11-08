@@ -259,7 +259,7 @@ test("invalid inputs never reach update", () => {
   const raw = net.endpoint("c");
   raw.send(
     "h",
-    encodePacket({ tick: 0 }, [{ type: "hello", playerId: 1, proto: 2, hash: manifest.hash }]),
+    encodePacket({ tick: 0 }, [{ type: "hello", playerId: 1, proto: 3, hash: manifest.hash }]),
     true,
   );
   for (let i = 0; i < 5; i++) {

@@ -62,8 +62,10 @@ function newest(bag, tick, window) {
 function inputOk(s, values) {
   const issue = fieldIssue(s.manifest.inputs, values);
   if (!issue) return true;
+  const message = "rejected input field " + issue;
   const warn = s.game && s.game.warn;
-  if (s.dev && typeof warn === "function") warn("rejected input field " + issue);
+  if (s.dev && typeof warn === "function") warn(message);
+  else if (s.dev) console.warn(message);
   return false;
 }
 

@@ -35,6 +35,12 @@ export function createNet(s) {
     onEnd(fn) {
       (s.enders = s.enders || []).push(fn);
     },
+    onPeerJoin(fn) {
+      (s.joiners = s.joiners || []).push(fn);
+    },
+    onPeerLeave(fn) {
+      (s.leavers = s.leavers || []).push(fn);
+    },
     setFocus(playerId, x, y) {
       setFocus(s, playerId, x, y);
     },

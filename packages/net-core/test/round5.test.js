@@ -122,7 +122,7 @@ test("the same peer id can rejoin after a reload", () => {
   group.clientEp.send(
     "p0",
     encodePacket({ tick: 1, flags: 1 }, [
-      { type: "hello", playerId: 1, proto: 2, hash: group.manifest.hash },
+      { type: "hello", playerId: 1, proto: 3, hash: group.manifest.hash },
     ]),
     true,
   );
@@ -137,7 +137,7 @@ test("the same peer id can rejoin after a reload", () => {
 test("a silent peer is dropped and stops receiving state", () => {
   const group = pair();
   group.run(4);
-  const limit = group.manifest.tickHz * 2 + 2;
+  const limit = Math.ceil((group.manifest.silenceMs / 1000) * group.manifest.tickHz) + 2;
   for (let i = 0; i < limit; i++) group.host.step();
   group.net.advance(20);
   group.client.step();
@@ -304,9 +304,9 @@ test("a snapshot larger than 64 KiB still lets a late joiner in", () => {
   const manifest = defineManifest({
     maxPlayers: 2,
     maxEntities: 400,
-    custom: { tag: { type: "string", max: 160 } },
+    custom: { tag: { type: "string", max: 200 } },
   });
-  const tag = "z".repeat(120);
+  const stem = "z".repeat(170);
   let clock = 0;
   const net = createNetwork({ seed: 6, latency: 0 });
   const mediator = createMediator({ manifest, now: () => clock });
@@ -315,7 +315,7 @@ test("a snapshot larger than 64 KiB still lets a late joiner in", () => {
     game: {
       init(world, api) {
         if (!api.isHost) return;
-        for (let i = 0; i < 400; i++) world.spawn("mob", { x: i, custom: { tag } });
+        for (let i = 0; i < 400; i++) world.spawn("mob", { x: i, custom: { tag: stem + "-" + i } });
       },
       update() {},
       render() {},
@@ -342,7 +342,17 @@ test("a snapshot larger than 64 KiB still lets a late joiner in", () => {
   }
   assert.equal(client.ended, false, client.reason);
   assert.equal(client.joined, true);
-  assert.equal(client.world.query("mob").length, 400);
+  const mobs = client.world.query("mob");
+  assert.equal(mobs.length, 400);
+  const seen = new Set();
+  let payload = 0;
+  for (const mob of mobs) {
+    const tag = String(mob.custom.tag);
+    seen.add(tag);
+    payload += tag.length;
+  }
+  assert.equal(seen.size, 400);
+  assert.ok(payload > 65536, "snapshot payload " + payload);
 });
 
 test("shared custom stamps keep interning after 4096 distinct values", () => {

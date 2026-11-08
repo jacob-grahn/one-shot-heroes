@@ -29,17 +29,38 @@ function deepFreeze(value) {
 /** @param {Record<string, any>} src @param {string} focus */
 function manifestBody(src, focus) {
   return {
-    maxPlayers: optInt(src.maxPlayers, 1, LIMITS.maxPlayers, LIMITS.maxPlayers),
+    maxPlayers: optInt(src.maxPlayers, LIMITS.maxPlayers, {
+      min: 1,
+      max: LIMITS.maxPlayers,
+      name: "manifest.maxPlayers",
+    }),
     focus,
-    tickHz: optInt(src.tickHz, 1, 60, LIMITS.tickHz),
-    budget: optInt(src.budget, 48, 1400, LIMITS.budget),
-    starvationK: optInt(src.starvationK, 1, 120, LIMITS.starvationK),
-    interpMs: optInt(src.interpMs, 0, 1000, LIMITS.interpMs),
-    teleport: optNum(src.teleport, LIMITS.teleport),
-    cell: optNum(src.cell, LIMITS.cell),
-    focusClamp: optNum(src.focusClamp, LIMITS.focusClamp),
-    inputRedundancy: optInt(src.inputRedundancy, 1, 16, LIMITS.inputRedundancy),
-    maxEntities: optInt(src.maxEntities, 1, 100000, 400),
+    tickHz: optInt(src.tickHz, LIMITS.tickHz, { min: 1, max: 60, name: "manifest.tickHz" }),
+    budget: optInt(src.budget, LIMITS.budget, { min: 48, max: 1400, name: "manifest.budget" }),
+    starvationK: optInt(src.starvationK, LIMITS.starvationK, {
+      min: 1,
+      max: 120,
+      name: "manifest.starvationK",
+    }),
+    interpMs: optInt(src.interpMs, LIMITS.interpMs, {
+      min: 0,
+      max: 1000,
+      name: "manifest.interpMs",
+    }),
+    teleport: optNum(src.teleport, LIMITS.teleport, "manifest.teleport"),
+    cell: optNum(src.cell, LIMITS.cell, "manifest.cell"),
+    focusClamp: optNum(src.focusClamp, LIMITS.focusClamp, "manifest.focusClamp"),
+    inputRedundancy: optInt(src.inputRedundancy, LIMITS.inputRedundancy, {
+      min: 1,
+      max: 16,
+      name: "manifest.inputRedundancy",
+    }),
+    silenceMs: optInt(src.silenceMs, 12000, { min: 1000, max: 120000, name: "manifest.silenceMs" }),
+    maxEntities: optInt(src.maxEntities, 400, {
+      min: 1,
+      max: 100000,
+      name: "manifest.maxEntities",
+    }),
     avatarType: src.avatarType || "",
     avatarOwnerKey: ownerKey(src.avatarOwnerKey),
     quant: normQuant(src.quant),
@@ -61,13 +82,25 @@ function ownerKey(key) {
 function normQuant(src) {
   const q = src || {};
   const quant = {
-    posMin: optNum(q.posMin, LIMITS.posMin),
-    posMax: optNum(q.posMax, LIMITS.posMax),
-    scaleMin: optNum(q.scaleMin, LIMITS.scaleMin),
-    scaleMax: optNum(q.scaleMax, LIMITS.scaleMax),
+    posMin: optNum(q.posMin, LIMITS.posMin, "manifest.quant.posMin"),
+    posMax: optNum(q.posMax, LIMITS.posMax, "manifest.quant.posMax"),
+    scaleMin: optNum(q.scaleMin, LIMITS.scaleMin, "manifest.quant.scaleMin"),
+    scaleMax: optNum(q.scaleMax, LIMITS.scaleMax, "manifest.quant.scaleMax"),
   };
-  if (quant.posMin >= quant.posMax || quant.scaleMin >= quant.scaleMax)
-    fail("range", "quant range");
+  if (quant.posMin >= quant.posMax)
+    fail(
+      "range",
+      "manifest.quant.posMin must be below posMax (got " + quant.posMin + ".." + quant.posMax + ")",
+    );
+  if (quant.scaleMin >= quant.scaleMax)
+    fail(
+      "range",
+      "manifest.quant.scaleMin must be below scaleMax (got " +
+        quant.scaleMin +
+        ".." +
+        quant.scaleMax +
+        ")",
+    );
   return quant;
 }
 
@@ -82,16 +115,18 @@ function plainDict(obj) {
   return out;
 }
 
-/** @param {number} v @param {number} min @param {number} max @param {number} fallback */
-function optInt(v, min, max, fallback) {
+/** @param {number} v @param {number} fallback @param {{ min: number, max: number, name: string }} rule */
+function optInt(v, fallback, rule) {
   if (v == null) return fallback;
-  if (!Number.isInteger(v) || v < min || v > max) fail("range");
+  if (!Number.isInteger(v) || v < rule.min || v > rule.max)
+    fail("range", rule.name + " must be " + rule.min + ".." + rule.max + " (got " + v + ")");
   return v;
 }
 
-/** @param {number} v @param {number} fallback */
-function optNum(v, fallback) {
+/** @param {number} v @param {number} fallback @param {string} name */
+function optNum(v, fallback, name) {
   if (v == null) return fallback;
-  if (typeof v !== "number" || !Number.isFinite(v)) fail("range");
+  if (typeof v !== "number" || !Number.isFinite(v))
+    fail("range", name + " must be a finite number (got " + v + ")");
   return v;
 }

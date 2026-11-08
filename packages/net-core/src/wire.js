@@ -29,6 +29,7 @@ export {
   plainClone,
   sealBytes,
   stampSnapshot,
+  userText,
   clearSeal,
   quantize,
   mulberry32,

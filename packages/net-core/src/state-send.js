@@ -38,9 +38,28 @@ function fillOne(s, entity, quant) {
     s.slots.set(entity.id, slot);
   }
   const prev = slot.custom;
+  const pose = poseOf(slot);
   fillPose(slot, entity, quant);
   if (fresh || isCustomDirty(entity)) keepCustom(s, slot, entity, prev);
+  if (fresh || poseChanged(pose, slot) || slot.custom !== prev) slot.rev = (slot.rev || 0) + 1;
   slot.plan = null;
+}
+
+/** @param {any} slot */
+function poseOf(slot) {
+  return [slot.x, slot.y, slot.rotation, slot.scale, slot.anim, slot.animStart];
+}
+
+/** @param {number[]} pose @param {any} slot */
+function poseChanged(pose, slot) {
+  return (
+    pose[0] !== slot.x ||
+    pose[1] !== slot.y ||
+    pose[2] !== slot.rotation ||
+    pose[3] !== slot.scale ||
+    pose[4] !== slot.anim ||
+    pose[5] !== slot.animStart
+  );
 }
 
 /** Size-check and copy custom only after a write. Unchanged entities keep the last snapshot. */
@@ -105,7 +124,11 @@ function consider(s, peer, entity) {
   const cur = s.slots.get(entity.id);
   const acked = peer.confirmed.get(entity.id);
   if (!cur || !acked) return null;
+  if (!peer.ackRev) peer.ackRev = new Map();
+  if (peer.ackRev.get(entity.id) === cur.rev) return null;
+  if ((peer.ver.get(entity.id) || 0) > (acked.version || 0)) return dirtyItem(s, peer, entity, cur);
   if (samePose(cur, acked.q) && sameCustom(cur.custom, acked.q.custom)) {
+    peer.ackRev.set(entity.id, cur.rev);
     peer.dirtyAt.delete(entity.id);
     return null;
   }

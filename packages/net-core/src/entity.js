@@ -8,6 +8,7 @@ import {
   sealBytes,
   stampSnapshot,
   clearSeal,
+  userText,
   valueBytes,
 } from "./wire.js";
 
@@ -204,8 +205,7 @@ function storeCustom(src) {
 
 /** @param {unknown} value */
 function keep(value) {
-  if (isUserText(value))
-    return { text: /** @type {{ text: string }} */ (value).text, userContent: true };
+  if (isUserText(value)) return userText(/** @type {{ text: string }} */ (value).text);
   if (Array.isArray(value)) return value.map(keep);
   if (value && typeof value === "object") return storeCustom(value);
   return plainClone(value);

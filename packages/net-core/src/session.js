@@ -20,13 +20,18 @@ import {
 } from "./relay.js";
 import { refreshSlots, sendDirty } from "./state-send.js";
 import { mulberry32 } from "./rng.js";
-import { finish, fireEnd, fireJoin } from "./lifecycle.js";
+import { finish, fireEnd, fireJoin, fireLeave } from "./lifecycle.js";
 import { PROTOCOL, canon, decodePacket, defineManifest, quantize } from "./wire.js";
 import { createWorld } from "./world.js";
 
 /** @param {Record<string, any>} options */
 export function createSession(options) {
-  const s = blank(options);
+  const opts = options || {};
+  if (!opts.game || typeof opts.game.init !== "function" || typeof opts.game.update !== "function")
+    throw new Error("createSession needs a game with init, update, and render");
+  if (!opts.isHost && !opts.hostPeerId)
+    throw new Error("client needs hostPeerId; pass isHost: true to host the room");
+  const s = blank(opts);
   initIds(s, options);
   s.world = createWorld(hooks(s));
   s.net = createNet(s);
@@ -94,7 +99,8 @@ function blank(options) {
   s.rng = mulberry32(s.seed);
   s.est = () => (s.isHost ? s.shownTick : s.lastHostTick + (s.steps - s.lastHostAt));
   s.clockTick = () => (s.isHost && s.inUpdate ? s.tick : s.est());
-  if (!s.isHost && !s.hostPeerId) throw new Error("client needs hostPeerId");
+  if (!s.isHost && !s.hostPeerId)
+    throw new Error("client needs hostPeerId; pass isHost: true to host the room");
   return s;
 }
 
@@ -102,10 +108,12 @@ function blank(options) {
 function wireSession(s) {
   if (s.isHost) s.players.push({ id: s.playerId, host: true });
   assertWelcome(s);
-  s.dropPeer = (peerId) => leave(s, peerId, true);
-  s.releasePeer = (peerId) => leave(s, peerId, false);
+  s.dropPeer = (peerId) => leave(s, peerId, "dropped");
+  s.releasePeer = (peerId) => leave(s, peerId, "replaced");
+  s.dropFor = (peerId, reason) => leave(s, peerId, reason);
   s.fireJoin = (info) => fireJoin(s, info);
   s.fireEnd = () => fireEnd(s);
+  s.fireLeave = (info) => fireLeave(s, info);
 }
 
 /** @param {any} s @param {Record<string, any>} options */
@@ -148,6 +156,7 @@ function freshStats() {
     skipped: 0,
     customReverted: 0,
     updateErrors: 0,
+    staleness: 0,
     sends: [],
     phases: { diff: 0, grid: 0, priority: 0, encode: 0, alloc: 0, other: 0 },
   };
@@ -201,18 +210,19 @@ function freshSeed() {
 /** @param {any} s */
 function listen(s) {
   s.transport.onMessage((from, bytes) => s.inbox.push({ from, bytes }));
-  if (s.transport.onPeerLeave) s.transport.onPeerLeave((peerId) => leave(s, peerId));
+  if (s.transport.onPeerLeave) s.transport.onPeerLeave((peerId) => leave(s, peerId, "dropped"));
 }
 
-/** @param {any} s @param {string} peerId */
-function leave(s, peerId, tell) {
+/** @param {any} s @param {string} peerId @param {string} [reason] */
+function leave(s, peerId, reason) {
   if (!s.isHost && peerId === s.hostPeerId) {
     finish(s, "host_left");
     return;
   }
   const peer = s.peers.get(peerId);
   if (!peer) return;
-  if (tell) rejectPeer(s, peerId, 4);
+  const code = reason === "version" ? 1 : reason === "dropped" ? 4 : 0;
+  if (code) rejectPeer(s, peerId, code);
   s.peers.delete(peerId);
   s.players = s.players.filter((player) => player.id !== peer.playerId);
   s.inputLog.delete(peer.playerId);
@@ -220,8 +230,9 @@ function leave(s, peerId, tell) {
   s.focus.delete(peer.playerId);
   s.seen.delete(peer.playerId);
   s.epochs.delete(peer.playerId);
-  if (tell) forget(s, peerId);
+  if (code) forget(s, peerId);
   announce(s);
+  if (s.fireLeave) s.fireLeave({ peerId, reason: reason || "replaced" });
   fireEnd(s);
 }
 
@@ -298,6 +309,7 @@ function stepHost(s) {
   s.stats.phases.other += performance.now() - t;
   refreshSlots(s);
   for (const peer of s.peers.values()) sendPeer(s, peer);
+  noteStale(s);
   pruneInputs(s);
   s.shownTick = s.tick;
   s.tick += 1;
@@ -364,14 +376,26 @@ function close(s) {
   finish(s, s.reason || "close");
 }
 
-/** A joined peer that sends nothing for two seconds is dropped and told. */
+/** Drop a joined peer that has sent nothing for silenceMs of host time. */
 function sweepSilent(s) {
-  const limit = s.manifest.tickHz * 2;
+  const limit = Math.ceil((s.manifest.silenceMs / 1000) * s.manifest.tickHz);
   for (const peer of [...s.peers.values()]) {
     if (!peer.live) continue;
     if (s.tick - (peer.lastHeard || 0) < limit) continue;
-    leave(s, peer.peerId, true);
+    leave(s, peer.peerId, "dropped");
   }
+}
+
+/** @param {any} s */
+function noteStale(s) {
+  let stale = 0;
+  for (const peer of s.peers.values()) {
+    for (const at of peer.dirtyAt.values()) {
+      const age = s.tick - at;
+      if (age > stale) stale = age;
+    }
+  }
+  s.stats.staleness = stale;
 }
 
 /** @param {unknown} err */

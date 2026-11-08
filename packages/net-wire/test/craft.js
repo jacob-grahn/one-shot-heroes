@@ -16,7 +16,7 @@ export function badKey(key) {
   body.i32(1);
   const payload = body.finish();
   const packet = createWriter();
-  packet.u8(2);
+  packet.u8(3);
   packet.u8(0);
   packet.u32(1);
   packet.u16(1);

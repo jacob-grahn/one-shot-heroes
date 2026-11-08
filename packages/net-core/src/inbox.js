@@ -17,7 +17,15 @@ export function drain(s) {
 /** @param {any} s @param {{ from: string, bytes: Uint8Array }} item */
 function dispatch(s, item) {
   const packet = s.decode(item.bytes);
-  if (!packet.ok) return;
+  if (!packet.ok) {
+    if (packet.error === "version") rejectVersion(s, item.from);
+    return;
+  }
+  route(s, item, packet);
+}
+
+/** @param {any} s @param {{ from: string, bytes: Uint8Array }} item @param {any} packet */
+function route(s, item, packet) {
   if (!fromPeer(s, item.from)) {
     const hello = packet.messages.filter((message) => message.type === "hello");
     if (!hello.length) return;
@@ -87,10 +95,10 @@ const HANDLERS = {
 function onHello(s, message, from) {
   if (!s.isHost || s.ended) return;
   if (s.peers.has(from) && s.releasePeer) s.releasePeer(from);
-  if (message.proto !== PROTOCOL) return rejectPeer(s, from, 1);
-  if (message.hash !== s.manifest.hash) return rejectPeer(s, from, 2);
-  if (s.players.some((player) => player.id === message.playerId)) return rejectPeer(s, from, 3);
-  if (s.players.length >= s.manifest.maxPlayers) return rejectPeer(s, from, 3);
+  if (message.proto !== PROTOCOL) return rejectJoin(s, from, 1);
+  if (message.hash !== s.manifest.hash) return rejectJoin(s, from, 2);
+  if (s.players.some((player) => player.id === message.playerId)) return rejectJoin(s, from, 3);
+  if (s.players.length >= s.manifest.maxPlayers) return rejectJoin(s, from, 5);
   acceptPeer(s, from, message.playerId);
 }
 
@@ -117,10 +125,31 @@ function onReject(s, message, from) {
 
 /** @param {number} code */
 function reasonOf(code) {
-  if (code === 2) return "hash";
   if (code === 1) return "version";
+  if (code === 2) return "hash";
+  if (code === 3) return "seat";
   if (code === 4) return "dropped";
+  if (code === 5) return "full";
   return "reject";
+}
+
+/** @param {any} s @param {string} from @param {number} code */
+function rejectJoin(s, from, code) {
+  rejectPeer(s, from, code);
+  if (s.fireLeave) s.fireLeave({ peerId: from, reason: reasonOf(code) });
+}
+
+/** A packet from another build cannot be applied. End that side instead of ignoring it. */
+function rejectVersion(s, from) {
+  if (!s.isHost) {
+    if (from !== s.hostPeerId) return;
+    s.ended = true;
+    s.reason = "version";
+    if (s.fireEnd) s.fireEnd();
+    return;
+  }
+  if (s.peers.has(from) && s.dropFor) s.dropFor(from, "version");
+  else rejectJoin(s, from, 1);
 }
 
 /** @param {any} s @param {any} message @param {string} _from @param {number} tick */

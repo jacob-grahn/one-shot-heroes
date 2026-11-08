@@ -251,12 +251,54 @@ export function customStamp(obj) {
   return adopt(obj, encodeBytes(obj));
 }
 
+const asciiStamp = new Map();
+
 /** Encode a live object once at write time. The snapshot reuses those bytes. */
 export function sealBytes(obj) {
+  const hit = cachedAscii(obj);
+  if (hit) {
+    stamps.set(obj, hit);
+    sealed.set(obj, hit.bytes);
+    return hit.len;
+  }
+  stamps.delete(obj);
   const bytes = encodeBytes(obj);
   if (bytes.length <= 1024) sealed.set(obj, bytes);
   else sealed.delete(obj);
   return bytes.length;
+}
+
+/** A repeated one-string object skips re-encoding. Unique strings are not cached. */
+function cachedAscii(obj) {
+  const pair = oneString(obj);
+  if (!pair) return null;
+  const byKey = asciiStamp.get(pair.key);
+  return byKey ? byKey.get(pair.value) : null;
+}
+
+/** @param {Record<string, unknown>} obj @param {{ gen: number, len: number, bytes: Uint8Array | null }} stamp */
+function noteAscii(obj, stamp) {
+  const pair = oneString(obj);
+  if (!pair || pair.value.length > 160) return;
+  let byKey = asciiStamp.get(pair.key);
+  if (!byKey) {
+    byKey = new Map();
+    asciiStamp.set(pair.key, byKey);
+  }
+  if (byKey.has(pair.value)) byKey.delete(pair.value);
+  byKey.set(pair.value, stamp);
+  while (byKey.size > 64) byKey.delete(byKey.keys().next().value);
+}
+
+/** @param {Record<string, unknown>} obj */
+function oneString(obj) {
+  if (!obj || typeof obj !== "object") return null;
+  const keys = Object.keys(obj);
+  if (keys.length !== 1) return null;
+  const key = keys[0];
+  const value = obj[key];
+  if (typeof value !== "string") return null;
+  return { key, value };
 }
 
 /** @param {Record<string, unknown>} live @param {Record<string, unknown>} snap */
@@ -279,6 +321,7 @@ function adopt(obj, bytes) {
     byHash.delete(hash);
     byHash.set(hash, known);
     stamps.set(obj, known);
+    noteAscii(obj, known);
     return known;
   }
   const stamp = { gen: ++genN, len: bytes.length, bytes };

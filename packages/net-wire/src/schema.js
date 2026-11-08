@@ -17,22 +17,22 @@ export function normField(name, src) {
 /** @param {string} name @param {string} type @param {Record<string, any>} src */
 function fill(name, type, src) {
   const field = { name, type };
-  if (type === "int") intBounds(field, src);
-  if (type === "string") field.max = req(src.max, 0, 65535);
+  if (type === "int") intBounds(field, src, name);
+  if (type === "string") field.max = req(src.max, 0, 65535, name + ".max");
   if (type === "array") arrayField(field, name, src);
   if (type === "object") field.fields = normMap(src.fields);
   return field;
 }
 
 /** @param {Record<string, any>} field @param {Record<string, any>} src */
-function intBounds(field, src) {
-  field.min = req(src.min, -0x80000000, 0x7fffffff);
-  field.max = req(src.max, field.min, 0x7fffffff);
+function intBounds(field, src, name) {
+  field.min = req(src.min, -0x80000000, 0x7fffffff, name + ".min");
+  field.max = req(src.max, field.min, 0x7fffffff, name + ".max");
 }
 
 /** @param {Record<string, any>} field @param {string} name @param {Record<string, any>} src */
 function arrayField(field, name, src) {
-  field.max = src.max == null ? 255 : req(src.max, 0, 255);
+  field.max = src.max == null ? 255 : req(src.max, 0, 255, name + ".max");
   field.item = normField(name + "[]", src.item);
 }
 
@@ -62,9 +62,10 @@ function normEvent(name, src) {
   return { name, relay: body.relay === true, fields: normMap(fields) };
 }
 
-/** @param {number} v @param {number} min @param {number} max */
-function req(v, min, max) {
-  if (!Number.isInteger(v) || v < min || v > max) fail("range", "schema bound");
+/** @param {number} v @param {number} min @param {number} max @param {string} name */
+function req(v, min, max, name) {
+  if (!Number.isInteger(v) || v < min || v > max)
+    fail("range", name + " must be " + min + ".." + max + " (got " + v + ")");
   return v;
 }
 
