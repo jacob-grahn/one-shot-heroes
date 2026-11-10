@@ -29,5 +29,10 @@ export default [
     files: ['**/*.config.js', '**/*.mjs'],
     languageOptions: { sourceType: 'module', globals: { ...globals.node } },
   },
+  {
+    // node tests for the sync engine (the size gate already exempts these paths)
+    files: ['packages/**/test/**/*.js'],
+    languageOptions: { sourceType: 'module', globals: { ...globals.node } },
+  },
   ...sizeGate,
 ];
