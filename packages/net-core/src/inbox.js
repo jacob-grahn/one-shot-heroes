@@ -10,8 +10,18 @@ import { PROTOCOL, isFrozenRefusal } from "./wire.js";
 
 /** @param {any} s */
 export function drain(s) {
+  s.acceptedTick = -1;
+  grantQueued(s);
   const batch = s.inbox.splice(0);
   for (const item of batch) dispatch(s, item);
+}
+
+/** One queued hello per tick. It is checked again, so a bye can drop it first. */
+function grantQueued(s) {
+  if (!s.isHost || !s.pendingHellos || !s.pendingHellos.size) return;
+  const next = s.pendingHellos.entries().next().value;
+  s.pendingHellos.delete(next[0]);
+  onHello(s, next[1], next[0]);
 }
 
 /** @param {any} s @param {{ from: string, bytes: Uint8Array }} item */
@@ -73,6 +83,7 @@ function noteTick(s, tick) {
 
 /** @param {any} s @param {any} message @param {string} from @param {number} tick */
 function handle(s, message, from, tick) {
+  if (message.type === "bye" && s.pendingHellos) s.pendingHellos.delete(from);
   const fn = HANDLERS[message.type];
   if (fn) fn(s, message, from, tick);
 }
@@ -95,27 +106,53 @@ const HANDLERS = {
 function onHello(s, message, from) {
   if (!s.isHost || s.ended) return;
   const peer = s.peers.get(from);
-  if (sameSeat(s, peer, message)) return refreshWelcome(s, peer);
-  if (otherSeat(peer, message)) return rejectJoin(s, from, 3);
-  if (acceptedRecently(s, from)) return;
-  if (fastNonce(s, from, peer, message)) return;
-  if (peer && s.releasePeer) s.releasePeer(from);
-  const code = helloCode(s, message);
+  if (skipHello(s, peer, message, from)) return;
+  const code = helloCode(s, message, peer);
   if (code) return rejectJoin(s, from, code);
+  if (s.acceptedTick === 0) return holdHello(s, from, message);
+  if (!grantAccept(s, from, peer)) return;
+  s.acceptedTick = 0;
+  if (peer && s.releasePeer) s.releasePeer(from);
   acceptPeer(s, from, message.playerId, message.nonce || 0);
 }
 
-/** One full accept per peer id per second, and a room-wide token bucket. */
+/** @param {any} s @param {any} peer @param {any} message @param {string} from */
+function skipHello(s, peer, message, from) {
+  if (sameSeat(s, peer, message)) {
+    refreshWelcome(s, peer);
+    return true;
+  }
+  if (otherSeat(peer, message)) {
+    rejectJoin(s, from, 3);
+    return true;
+  }
+  if (acceptedRecently(s, from)) return true;
+  return fastNonce(s, from, peer, message);
+}
+
+/** Keep a valid hello for a later tick. The queue holds at most one per player cap. */
+function holdHello(s, from, message) {
+  if (!s.pendingHellos) s.pendingHellos = new Map();
+  if (s.pendingHellos.has(from) || s.pendingHellos.size < s.manifest.maxPlayers)
+    s.pendingHellos.set(from, message);
+}
+
+/** True when this peer id was granted a seat less than a second ago. */
 function acceptedRecently(s, from) {
+  const at = s.acceptAt && s.acceptAt.get(from);
+  return at != null && s.now() - at < 1000;
+}
+
+/** Spend a room token only once version, hash, and the seat have already passed. */
+function grantAccept(s, from, peer) {
   const now = s.now();
+  const settled = peer && peer.live && now - (peer.joinedAt || 0) >= 10000;
+  if (!takeAcceptToken(s, now) && !settled) return false;
   if (!s.acceptAt) s.acceptAt = new Map();
-  const at = s.acceptAt.get(from);
-  if (at != null && now - at < 1000) return true;
-  if (!takeAcceptToken(s, now)) return true;
   pruneStamps(s.acceptAt, now);
   pruneStamps(s.rejoinAt, now);
   s.acceptAt.set(from, now);
-  return false;
+  return true;
 }
 
 /** Burst of maxPlayers, then two full accepts per second for the whole room. */
@@ -136,12 +173,13 @@ function pruneStamps(map, now) {
   for (const [id, t] of map) if (now - t >= 10000) map.delete(id);
 }
 
-/** @param {any} s @param {any} message */
-function helloCode(s, message) {
+/** @param {any} s @param {any} message @param {any} peer */
+function helloCode(s, message, peer) {
   if (message.proto !== PROTOCOL) return 1;
   if (message.hash !== s.manifest.hash) return 2;
-  if (s.players.some((player) => player.id === message.playerId)) return 3;
-  if (s.players.length >= s.manifest.maxPlayers) return 5;
+  const own = peer && peer.live && peer.playerId === message.playerId ? 1 : 0;
+  if (!own && s.players.some((player) => player.id === message.playerId)) return 3;
+  if (s.players.length - own >= s.manifest.maxPlayers) return 5;
   return 0;
 }
 
