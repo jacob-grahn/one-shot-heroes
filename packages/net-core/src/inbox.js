@@ -96,39 +96,44 @@ function onHello(s, message, from) {
   if (!s.isHost || s.ended) return;
   const peer = s.peers.get(from);
   if (sameSeat(s, peer, message)) return refreshWelcome(s, peer);
-  if (refuseHello(s, from, peer, message)) return;
+  if (otherSeat(peer, message)) return rejectJoin(s, from, 3);
+  if (acceptedRecently(s, from)) return;
+  if (fastNonce(s, from, peer, message)) return;
   if (peer && s.releasePeer) s.releasePeer(from);
   const code = helloCode(s, message);
   if (code) return rejectJoin(s, from, code);
-  if (acceptedRecently(s, from)) return;
   acceptPeer(s, from, message.playerId, message.nonce || 0);
 }
 
-/** At most one full accept per peer id per second. The mark survives bye and release. */
+/** One full accept per peer id per second, and a room-wide token bucket. */
 function acceptedRecently(s, from) {
   const now = s.now();
   if (!s.acceptAt) s.acceptAt = new Map();
   const at = s.acceptAt.get(from);
   if (at != null && now - at < 1000) return true;
+  if (!takeAcceptToken(s, now)) return true;
   pruneStamps(s.acceptAt, now);
   pruneStamps(s.rejoinAt, now);
   s.acceptAt.set(from, now);
   return false;
 }
 
+/** Burst of maxPlayers, then two full accepts per second for the whole room. */
+function takeAcceptToken(s, now) {
+  const cap = s.manifest.maxPlayers;
+  const bucket = s.acceptBucket || (s.acceptBucket = { tokens: cap, at: now });
+  const gained = ((now - bucket.at) / 1000) * 2;
+  bucket.tokens = Math.min(cap, bucket.tokens + gained);
+  bucket.at = now;
+  if (bucket.tokens < 1) return false;
+  bucket.tokens -= 1;
+  return true;
+}
+
 /** @param {Map<string, number> | undefined} map @param {number} now */
 function pruneStamps(map, now) {
   if (!map || map.size <= 256) return;
   for (const [id, t] of map) if (now - t >= 10000) map.delete(id);
-}
-
-/** @param {any} s @param {string} from @param {any} peer @param {any} message */
-function refuseHello(s, from, peer, message) {
-  if (otherSeat(peer, message)) {
-    rejectJoin(s, from, 3);
-    return true;
-  }
-  return fastNonce(s, from, peer, message);
 }
 
 /** @param {any} s @param {any} message */

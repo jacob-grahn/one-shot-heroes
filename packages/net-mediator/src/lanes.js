@@ -52,7 +52,8 @@ export function openLane(st, ctx) {
 function sweepIdle(st) {
   const now = st.now();
   pruneHellos(st, now);
-  if (st.joinHold) {
+  if (st.joinHold && now - (st.holdSweptAt || 0) >= 1000) {
+    st.holdSweptAt = now;
     for (const [peer, hold] of st.joinHold) if (now >= hold.until) st.joinHold.delete(peer);
   }
   const idle = [];
