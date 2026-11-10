@@ -236,9 +236,8 @@ function leave(s, peerId, reason) {
     return;
   }
   const peer = s.peers.get(peerId);
-  if (!peer) return;
-  const code = reason === "version" ? 1 : reason === "dropped" ? 4 : 0;
-  if (code) rejectPeer(s, peerId, code);
+  if (!peer || peer.leaving) return;
+  peer.leaving = true;
   s.peers.delete(peerId);
   s.players = s.players.filter((player) => player.id !== peer.playerId);
   s.inputLog.delete(peer.playerId);
@@ -246,11 +245,23 @@ function leave(s, peerId, reason) {
   s.focus.delete(peer.playerId);
   s.seen.delete(peer.playerId);
   s.epochs.delete(peer.playerId);
-  if (code) forget(s, peerId);
+  const code = reason === "version" ? 1 : reason === "dropped" ? 4 : 0;
+  if (code) sendReject(s, peerId, code);
   announce(s);
   if (peer.live && s.fireLeave)
     s.fireLeave({ playerId: peer.playerId, reason: reason || "replaced" });
   fireEnd(s);
+}
+
+/** The peer is already gone, so a mediator that rejects this send cannot re-enter leave. */
+function sendReject(s, peerId, code) {
+  try {
+    rejectPeer(s, peerId, code);
+  } catch (err) {
+    s.stats.sendErrors = (s.stats.sendErrors || 0) + 1;
+    void err;
+  }
+  forget(s, peerId);
 }
 
 /** @param {any} s @param {string} peerId */

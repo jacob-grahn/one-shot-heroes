@@ -118,41 +118,48 @@ function sendHelloLater(s) {
 
 /** @param {any} s */
 function joinLimit(s) {
-  return Math.ceil((s.manifest.silenceMs / 1000) * s.manifest.tickHz);
+  const ms = s.manifest.joinTimeoutMs == null ? 20000 : s.manifest.joinTimeoutMs;
+  return Math.ceil((ms / 1000) * s.manifest.tickHz);
 }
 
-/** One silence tick per real frame. A same-timestamp catch-up burst counts as one. */
+/** Remember the last real frame so a same-timestamp catch-up burst is skipped. */
 function creditSilence(s) {
   const now = s.now();
-  const tickMs = 1000 / s.manifest.tickHz;
-  if (s.silenceAt == null || now - s.silenceAt >= tickMs * 0.5) {
-    s.silenceTick = (s.silenceTick || 0) + 1;
-    s.silenceAt = now;
-  }
+  s.silenceGap = s.silenceAt == null ? 1000 : now - s.silenceAt;
+  s.silenceAt = now;
 }
 
-/** Drop a joined peer that has sent nothing for silenceMs of host time. */
+/** Silence is wall time since the last packet, except during a catch-up burst. */
 function sweepSilent(s) {
-  const limit = joinLimit(s);
+  const tickMs = 1000 / s.manifest.tickHz;
+  if (s.silenceGap < tickMs * 0.5) return;
+  const now = s.now();
   for (const peer of [...s.peers.values()]) {
     if (!peer.live) continue;
-    if (s.silenceTick - (peer.heardTick || 0) < limit) continue;
+    const heard = peer.heardAt == null ? now : peer.heardAt;
+    if (now - heard < s.manifest.silenceMs) continue;
     s.dropFor(peer.peerId, "dropped");
   }
 }
 
-/** @param {any} s */
+/** Age of the newest version the peer has not acked. A moving entity stays near zero. */
 function noteStale(s) {
   let stale = 0;
-  const quiet = Math.max(s.manifest.starvationK, Math.ceil(s.manifest.tickHz / 2));
   for (const peer of s.peers.values()) {
-    if (!peer.live || s.tick - (peer.lastHeard || 0) > quiet) continue;
-    for (const at of peer.dirtyAt.values()) {
-      const age = s.tick - at;
+    if (!peer.live) continue;
+    for (const [id, acked] of peer.confirmed) {
+      const age = ackAge(s, peer, id, acked.version || 0);
       if (age > stale) stale = age;
     }
   }
   s.stats.staleness = stale;
+}
+
+/** @param {any} s @param {any} peer @param {number} id @param {number} version */
+function ackAge(s, peer, id, version) {
+  if (version >= (peer.ver.get(id) || 0)) return 0;
+  const at = peer.ackAt && peer.ackAt.get(id);
+  return at == null ? s.tick : s.tick - at;
 }
 
 /** @param {unknown} err */

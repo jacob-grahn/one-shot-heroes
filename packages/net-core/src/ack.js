@@ -39,25 +39,46 @@ export function seqsFromAck(ack, bits) {
 }
 
 /** @param {{ sent: Map<number, any>, confirmed: Map<number, any> }} peer @param {number} ack @param {number} bits */
-export function confirmSent(peer, ack, bits) {
+export function confirmSent(peer, ack, bits, tick) {
   if (!peer.sent) return;
-  for (const seq of seqsFromAck(ack, bits)) applySeq(peer, seq);
+  if (ack) noteSkipped(peer, ack, bits);
+  for (const seq of seqsFromAck(ack, bits)) applySeq(peer, seq, tick);
 }
 
 /** @param {{ sent: Map<number, any>, confirmed: Map<number, any>, noteFree?: (ids: number[]) => void }} peer @param {number} seq */
-function applySeq(peer, seq) {
+function applySeq(peer, seq, tick) {
   const pkt = peer.sent.get(seq);
   if (!pkt) return;
-  for (const ent of pkt.ents) advance(peer, ent);
+  for (const ent of pkt.ents) advance(peer, ent, tick);
   if (pkt.free && pkt.free.length && peer.noteFree) peer.noteFree(pkt.free);
   peer.sent.delete(seq);
 }
 
-/** @param {{ confirmed: Map<number, any> }} peer @param {{ id: number, version: number, full: any }} ent */
-function advance(peer, ent) {
+/** A later ack that skips this seq means the packet was lost. Resend those entities now. */
+function noteSkipped(peer, ack, bits) {
+  if (!peer.missed) peer.missed = new Set();
+  for (const [seq, pkt] of peer.sent) {
+    if (!skippedSeq(seq, ack, bits)) continue;
+    for (const ent of pkt.ents || []) peer.missed.add(ent.id);
+  }
+}
+
+/** @param {number} seq @param {number} ack @param {number} bits */
+function skippedSeq(seq, ack, bits) {
+  const gap = (ack - seq) & 65535;
+  if (gap === 0 || gap >= 32768) return false;
+  if (gap > 32) return true;
+  return (bits & (1 << (gap - 1))) === 0;
+}
+
+/** @param {any} peer @param {{ id: number, version: number, full: any }} ent @param {number} [tick] */
+function advance(peer, ent, tick) {
   const cur = peer.confirmed.get(ent.id);
   if (cur && ent.version < cur.version) return;
   peer.confirmed.set(ent.id, { version: ent.version, q: ent.full });
+  if (!peer.ackAt) peer.ackAt = new Map();
+  if (tick != null) peer.ackAt.set(ent.id, tick);
+  if (peer.missed && ent.version >= (peer.ver.get(ent.id) || 0)) peer.missed.delete(ent.id);
 }
 
 /** @param {any} peer @param {number} seq @param {any[]} ents @param {number[]} [free] */

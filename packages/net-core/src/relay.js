@@ -94,6 +94,7 @@ export function acceptPeer(s, from, playerId) {
   s.players.push({ id: playerId, host: false });
   const records = baseline(s, peer);
   peer.lastHeard = s.tick;
+  peer.heardAt = s.now();
   peer.heardTick = s.silenceTick || 0;
   peer.queue.push(welcomeMessage(s, playerId));
   for (const snap of snapMessages(s, records)) peer.queue.push(snap);
@@ -134,6 +135,14 @@ export function assertWelcome(s) {
   ]).length;
   if (bytes <= s.manifest.budget) return;
   throw new Error("budget " + s.manifest.budget + " is below the welcome size " + bytes);
+}
+
+/** Resend the welcome at most about once a second. No snapshot and no announce. */
+export function refreshWelcome(s, peer) {
+  const now = s.now();
+  if (peer.welcomeAt != null && now - peer.welcomeAt < 1000) return;
+  peer.welcomeAt = now;
+  peer.queue.push(welcomeMessage(s, peer.playerId));
 }
 
 /** @param {any} s @param {number} playerId */

@@ -56,6 +56,11 @@ function manifestBody(src, focus) {
       name: "manifest.inputRedundancy",
     }),
     silenceMs: optInt(src.silenceMs, 12000, { min: 1000, max: 120000, name: "manifest.silenceMs" }),
+    joinTimeoutMs: optInt(src.joinTimeoutMs, 20000, {
+      min: 1000,
+      max: 120000,
+      name: "manifest.joinTimeoutMs",
+    }),
     maxEntities: optInt(src.maxEntities, 400, {
       min: 1,
       max: 100000,

@@ -5,8 +5,8 @@ import { applyUpdate, beginSnap, dropEntity, installRecord } from "./apply.js";
 import { acceptPeerEvent, applyCursors, deliverEvent, queueEvent } from "./events.js";
 import { rememberRemote } from "./input.js";
 import { mulberry32 } from "./rng.js";
-import { acceptPeer, rejectPeer } from "./relay.js";
-import { PROTOCOL } from "./wire.js";
+import { acceptPeer, refreshWelcome, rejectPeer } from "./relay.js";
+import { PROTOCOL, isFrozenRefusal } from "./wire.js";
 
 /** @param {any} s */
 export function drain(s) {
@@ -18,7 +18,7 @@ export function drain(s) {
 function dispatch(s, item) {
   const packet = s.decode(item.bytes);
   if (!packet.ok) {
-    if (packet.error === "version") rejectVersion(s, item.from);
+    if (packet.error === "version" || isFrozenRefusal(item.bytes)) rejectVersion(s, item.from);
     return;
   }
   route(s, item, packet);
@@ -33,7 +33,7 @@ function route(s, item, packet) {
   }
   const peer = s.isHost ? s.peers.get(item.from) : s.link;
   if (s.isHost && s.peers.has(item.from)) heard(s, item.from);
-  if (peer) confirmSent(peer, packet.ack, packet.ackBits);
+  if (peer) confirmSent(peer, packet.ack, packet.ackBits, s.tick);
   if (!s.isHost) noteTick(s, packet.tick);
   const ready = stateReady(s, packet);
   for (const message of packet.messages) handle(s, message, item.from, packet.tick);
@@ -94,7 +94,9 @@ const HANDLERS = {
 /** @param {any} s @param {any} message @param {string} from */
 function onHello(s, message, from) {
   if (!s.isHost || s.ended) return;
-  if (s.peers.has(from) && s.releasePeer) s.releasePeer(from);
+  const peer = s.peers.get(from);
+  if (peer && peer.live && peer.playerId === message.playerId) return refreshWelcome(s, peer);
+  if (peer && s.releasePeer) s.releasePeer(from);
   if (message.proto !== PROTOCOL) return rejectJoin(s, from, 1);
   if (message.hash !== s.manifest.hash) return rejectJoin(s, from, 2);
   if (s.players.some((player) => player.id === message.playerId)) return rejectJoin(s, from, 3);
@@ -206,6 +208,7 @@ function heard(s, from) {
   const peer = s.peers.get(from);
   if (!peer) return;
   peer.lastHeard = s.tick;
+  peer.heardAt = s.now();
   peer.heardTick = s.silenceTick || 0;
 }
 

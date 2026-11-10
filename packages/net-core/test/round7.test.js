@@ -227,7 +227,7 @@ test("a throwing onEnd does not escape step", () => {
   assert.ok(warnings.some((message) => message.includes("end broke")));
 });
 
-test("staleness can pass starvationK and a frozen peer does not pin it", () => {
+test("staleness follows the last acked version", () => {
   const manifest = defineManifest({ maxPlayers: 2, tickHz: 20, starvationK: 8 });
   const net = createNetwork({ seed: 2, latency: 0 });
   const raw = net.endpoint("p0");
@@ -306,7 +306,7 @@ test("staleness can pass starvationK and a frozen peer does not pin it", () => {
   for (let i = 0; i < 30; i++) alone.step();
   alone.world.query("box")[0].x = 4;
   for (let i = 0; i < 20; i++) alone.step();
-  assert.equal(alone.stats.staleness, 0);
+  assert.ok(alone.stats.staleness > manifest.starvationK);
 });
 
 test("onPeerLeave uses playerId and skips a hello that never joined", () => {
@@ -326,7 +326,7 @@ test("onPeerLeave uses playerId and skips a hello that never joined", () => {
 });
 
 test("a client gives up on a silent host", () => {
-  const manifest = defineManifest({ maxPlayers: 2, tickHz: 20, silenceMs: 1000 });
+  const manifest = defineManifest({ maxPlayers: 2, tickHz: 20, joinTimeoutMs: 1000 });
   const net = createNetwork({ seed: 1, latency: 0 });
   const client = createSession({
     manifest,

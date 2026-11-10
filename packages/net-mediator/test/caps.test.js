@@ -19,7 +19,7 @@ test("mediator enforces every cap, including prototype keys", () => {
   assert.equal(inspect(spawn(1, nest(5)), {}).code, "depth");
   assert.equal(inspect(spawn(1, fat()), {}).code, "custom");
   assert.equal(inspect(snap(3), { maxSnapshotBytes: 8 }).code, "budget");
-  assert.equal(rate(hello(1), 12, "joinPerSecond", 4), "");
+  assert.equal(rate(hello(1), 20, "joinPerSecond", 4), "join_rate");
   assert.equal(rate(big(), 3, "bytesPerSecond", 50), "bytes");
   for (const key of ["__proto__", "constructor", "prototype"]) {
     const packet = badKey(key);
@@ -146,12 +146,10 @@ test("byte and join windows are per peer and per direction", () => {
   const joins = createMediator({ caps: { joinPerSecond: 1 }, now: () => 0 });
   assert.equal(joins.inspect(hello(1), { peer: "a", dir: "in" }).ok, true);
   assert.equal(joins.inspect(hello(1), { peer: "a", dir: "in" }).ok, true);
+  assert.equal(joins.inspect(hello(1), { peer: "a", dir: "in" }).ok, true);
+  assert.equal(joins.inspect(hello(1), { peer: "a", dir: "in" }).ok, true);
+  assert.equal(joins.inspect(hello(1), { peer: "a", dir: "in" }).code, "join_rate");
   assert.equal(joins.inspect(hello(3), { peer: "b", dir: "in" }).ok, true);
-  const burst = encodePacket(
-    { tick: 1 },
-    Array.from({ length: 9 }, (_, n) => ({ type: "hello", playerId: n, proto: 3, hash: "abcd" })),
-  );
-  assert.equal(joins.inspect(burst, { peer: "c", dir: "in" }).code, "join_rate");
 });
 
 /** @param {Uint8Array} bytes @param {Record<string, number>} caps */

@@ -92,28 +92,62 @@ function block(st, ctx, code) {
   return { ok: false, code, disconnect };
 }
 
-/** A repeated hello from the same peer inside one second is a retry, not another join. */
+const HELLO_FREE = 3;
+
+/** Three free retries per join attempt. Further hellos pay the join limit. */
 function helloCharge(st, bag, n) {
+  if (st.joined.has(bag.ctx.peer)) return true;
+  pruneHellos(st, bag.now);
   const key = bag.ctx.peer + ":" + bag.ctx.dir;
-  const seen = st.helloAt || (st.helloAt = new Map());
-  const at = seen.get(key);
-  if (at != null && bag.now - at < 1000) return true;
+  const seen = helloBook(st);
+  const row = seen.get(key);
+  if (row && n === 1 && bag.now - row.at < 1000 && row.free > 0) {
+    row.free -= 1;
+    return true;
+  }
   if (!charge(bag.side.joins, bag.now, n, st.caps.joinPerSecond)) return false;
-  seen.set(key, bag.now);
+  if (!row || bag.now - row.at >= 1000) seen.set(key, { at: bag.now, free: HELLO_FREE });
   return true;
 }
 
-/** Version-mismatched bytes are forwarded. The session answers with a frozen refusal. */
+/** One version packet per peer per second, charged like a hello. Later ones are dropped. */
 function permitVersion(st, ctx) {
   if (!openLane(st, ctx)) {
     st.violations.push("lanes");
     return { ok: false, code: "lanes", logged: true };
   }
-  if (ctx.dir === "in" && ctx.reliable) {
-    const side = lane(st, ctx.peer, ctx.dir);
-    if (!helloCharge(st, { side, ctx, now: st.now() }, 1)) return block(st, ctx, "join_rate");
-  }
+  if (ctx.dir !== "in") return { ok: true };
+  const now = st.now();
+  pruneHellos(st, now);
+  const key = "v:" + ctx.peer;
+  const seen = helloBook(st);
+  const row = seen.get(key);
+  if (row && now - row.at < 1000)
+    return { ok: false, code: "join_rate", ignore: true, logged: true };
+  const side = lane(st, ctx.peer, ctx.dir);
+  if (!charge(side.joins, now, 1, st.caps.joinPerSecond)) return block(st, ctx, "join_rate");
+  seen.set(key, { at: now, free: 0 });
   return { ok: true };
+}
+
+/** @param {any} st */
+function helloBook(st) {
+  return st.helloTry || (st.helloTry = new Map());
+}
+
+/** @param {any} st @param {string} peer */
+function forgetHello(st, peer) {
+  const seen = st.helloTry;
+  if (!seen) return;
+  seen.delete(peer + ":in");
+  seen.delete(peer + ":out");
+}
+
+/** @param {any} st @param {number} now */
+function pruneHellos(st, now) {
+  const seen = st.helloTry;
+  if (!seen) return;
+  for (const [key, row] of seen) if (now - row.at > 10000) seen.delete(key);
 }
 
 /** @param {any} st @param {{ side: any, draft: any, ctx: any, size: number }} bag */
@@ -167,7 +201,11 @@ function commit(st, side, draft, ctx) {
   if (draft.snapEntities != null) applySnap(st, draft);
   else applySpawns(st, draft);
   if (draft.snapBytes) side.snapBytes = draft.snapBytes;
-  if (draft.welcome && ctx.dir === "out") st.joined.add(ctx.peer);
+  if (draft.welcome && ctx.dir === "out") {
+    st.joined.add(ctx.peer);
+    forgetHello(st, ctx.peer);
+  }
+  if (draft.reject && ctx.dir === "out") forgetHello(st, ctx.peer);
   if (draft.bye) forgetPeer(st, ctx.peer);
 }
 
@@ -239,6 +277,7 @@ function openLane(st, ctx) {
 /** Joined peers last 10s. A hello the host has not accepted lasts about 1.5s. */
 function sweepIdle(st) {
   const now = st.now();
+  pruneHellos(st, now);
   const idle = [];
   for (const [peer, row] of st.lanes) {
     if (peer !== "*" && now - row.at >= idleLimit(st, peer)) idle.push(peer);
@@ -314,6 +353,7 @@ function takeSpawns(st, side, now, n) {
 function forgetPeer(st, peer) {
   st.joined.delete(peer);
   st.lanes.delete(peer);
+  forgetHello(st, peer);
 }
 
 /** @param {any} st @param {string} peer @param {string} dir */

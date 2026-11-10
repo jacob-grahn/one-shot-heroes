@@ -7,10 +7,11 @@ import {
   plainClone,
   sealBytes,
   stampSnapshot,
-  clearSeal,
   userText,
   valueBytes,
 } from "./wire.js";
+
+export { isUserText, userText };
 
 const BAD = new Set(["__proto__", "constructor", "prototype"]);
 const CAP = 1024;
@@ -182,8 +183,18 @@ function defineKey(scope, target, key, desc) {
 /** @param {{ entity: any, root: Record<string, unknown> }} scope @param {Record<string, unknown>} target @param {string | symbol} key */
 function dropKey(scope, target, key) {
   if (typeof key !== "string") return false;
+  const prior = {
+    had: Object.prototype.hasOwnProperty.call(target, key),
+    prev: target[key],
+    len: Array.isArray(target) ? target.length : -1,
+  };
   delete target[key];
-  clearSeal(scope.root);
+  try {
+    if (sealBytes(scope.root) > CAP) throw new Error("custom data exceeds 1024 bytes");
+  } catch (err) {
+    restoreKey(target, key, prior);
+    throw err;
+  }
   dirty.add(scope.entity);
   return true;
 }

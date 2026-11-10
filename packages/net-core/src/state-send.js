@@ -69,7 +69,12 @@ function keepCustom(s, slot, entity, prev) {
     verdict = commitCustom(entity, prev);
   } catch (err) {
     s.stats.customReverted = (s.stats.customReverted || 0) + 1;
-    entity.custom = acceptedCustom(entity);
+    warnRevert(s, err);
+    try {
+      entity.custom = acceptedCustom(entity);
+    } catch (again) {
+      void again;
+    }
     return;
   }
   if (verdict === "same") return;
@@ -80,6 +85,15 @@ function keepCustom(s, slot, entity, prev) {
   if (verdict === "reverted") s.stats.customReverted += 1;
   slot.custom = acceptedCustom(entity);
   reviewCustom(s, entity);
+}
+
+/** @param {any} s @param {unknown} err */
+function warnRevert(s, err) {
+  const message = err instanceof Error ? err.message : String(err);
+  const warn = s.game && s.game.warn;
+  const text = "custom write reverted: " + message;
+  if (s.dev && typeof warn === "function") warn(text);
+  else if (s.dev) console.warn(text);
 }
 
 /** @param {any} s @param {any} entity */
@@ -131,7 +145,7 @@ function consider(s, peer, entity) {
   const cur = s.slots.get(entity.id);
   const acked = peer.confirmed.get(entity.id);
   if (!cur || !acked || held(peer, entity.id, cur.rev)) return null;
-  if (quiet(s, peer, { id: entity.id, cur, q: acked.q })) return null;
+  if (quiet(s, peer, { id: entity.id, cur, q: acked.q, ackVer: acked.version || 0 })) return null;
   return dirtyItem(s, peer, entity, cur);
 }
 
@@ -143,11 +157,18 @@ function held(peer, id, rev) {
 
 /** True when this description is already sent and not yet due for a retry. */
 function quiet(s, peer, bag) {
+  if (peer.missed && peer.missed.has(bag.id)) return false;
   const sent = peer.sentState && peer.sentState.get(bag.id);
   const ackMatch = sameContent(bag.cur, bag.q);
   const sentMatch = sent ? sameContent(bag.cur, sent) : ackMatch;
-  if (ackMatch && sentMatch) return settled(peer, bag.id, bag.cur.rev) === null;
+  if (ackMatch && sentMatch && covered(peer, bag))
+    return settled(peer, bag.id, bag.cur.rev) === null;
   return !!(sent && sentMatch && !starved(s, peer, bag.id));
+}
+
+/** Settle only after the peer has acked the newest version we sent. */
+function covered(peer, bag) {
+  return (bag.ackVer || 0) >= (peer.ver.get(bag.id) || 0);
 }
 
 /** Content matches what this peer has already acked. Stop sending it. */
@@ -334,6 +355,7 @@ function commit(s, peer, item) {
   if (!peer.sentState) peer.sentState = new Map();
   peer.sentAt.set(item.id, s.tick);
   peer.sentState.set(item.id, freeze(item.cur));
+  if (peer.missed) peer.missed.delete(item.id);
   item.version = version;
   return { id: item.id, version, baseVersion: item.baseVersion, cur: item.cur, base: item.base };
 }

@@ -17,6 +17,7 @@ export {
   customOps,
   customStamp,
   decodePacket,
+  isFrozenRefusal,
   defaultState,
   defineManifest,
   diffMask,
