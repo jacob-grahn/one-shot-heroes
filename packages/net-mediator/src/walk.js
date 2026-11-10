@@ -17,7 +17,7 @@ export function walk(caps, draft, packet, size) {
 
 /** @param {any} caps @param {any} draft @param {any} message @param {number} size */
 function one(caps, draft, message, size) {
-  if (message.type === "hello") return hello(draft);
+  if (message.type === "hello") return hello(draft, message);
   if (message.type === "reject") return reject(draft);
   if (message.type === "welcome") return welcome(draft);
   if (message.type === "spawn") return spawn(caps, draft, message.record);
@@ -40,8 +40,9 @@ function eventCap(caps, draft, message) {
 }
 
 /** @param {any} draft */
-function hello(draft) {
+function hello(draft, message) {
   draft.joins += 1;
+  draft.helloId = message.playerId;
   return "";
 }
 

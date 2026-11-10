@@ -68,6 +68,8 @@ function clearPeerEntity(s, peer, id) {
   if (peer.ackRev) peer.ackRev.delete(id);
   if (peer.sentState) peer.sentState.delete(id);
   if (peer.sentAt) peer.sentAt.delete(id);
+  if (peer.missed) peer.missed.delete(id);
+  if (peer.ackAt) peer.ackAt.delete(id);
   peer.acc.delete(id);
   peer.dirtyAt.delete(id);
   if (s.slots) s.slots.delete(id);
@@ -86,7 +88,7 @@ function spawnRecord(s, entity, cur) {
 }
 
 /** @param {any} s @param {string} from @param {number} playerId */
-export function acceptPeer(s, from, playerId) {
+export function acceptPeer(s, from, playerId, nonce) {
   const peer = createPeer(from, playerId);
   peer.epoch = s.nextEpoch += 1;
   s.epochs.set(playerId, peer.epoch);
@@ -95,6 +97,8 @@ export function acceptPeer(s, from, playerId) {
   const records = baseline(s, peer);
   peer.lastHeard = s.tick;
   peer.heardAt = s.now();
+  peer.joinedAt = s.now();
+  peer.nonce = nonce || 0;
   peer.heardTick = s.silenceTick || 0;
   peer.queue.push(welcomeMessage(s, playerId));
   for (const snap of snapMessages(s, records)) peer.queue.push(snap);
@@ -228,7 +232,13 @@ function sendReliable(s, peer, batch) {
 
 /** @param {any} s */
 export function sendHello(s) {
-  const message = { type: "hello", playerId: s.playerId, proto: s.proto, hash: s.manifest.hash };
+  const message = {
+    type: "hello",
+    playerId: s.playerId,
+    proto: s.proto,
+    hash: s.manifest.hash,
+    nonce: s.nonce || 0,
+  };
   emit(s, s.hostPeerId, encodePacket({ ...head(s, 1), ...ackHeader(s.link) }, [message]), {
     reliable: true,
   });

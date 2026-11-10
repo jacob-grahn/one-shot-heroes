@@ -150,6 +150,65 @@ test("byte and join windows are per peer and per direction", () => {
   assert.equal(joins.inspect(hello(1), { peer: "a", dir: "in" }).ok, true);
   assert.equal(joins.inspect(hello(1), { peer: "a", dir: "in" }).code, "join_rate");
   assert.equal(joins.inspect(hello(3), { peer: "b", dir: "in" }).ok, true);
+  const burst = encodePacket(
+    { tick: 1 },
+    Array.from({ length: 9 }, (_, n) => ({ type: "hello", playerId: n, proto: 3, hash: "abcd" })),
+  );
+  assert.equal(
+    createMediator({ now: () => 0 }).inspect(burst, { peer: "c", dir: "in" }).code,
+    "join_rate",
+  );
+});
+
+test("one peer gets at most 11 hellos per second at the default join limit", () => {
+  const mediator = createMediator({ caps: { joinPerSecond: 8 }, now: () => 0 });
+  const packet = hello(1);
+  let passed = 0;
+  let blocked = false;
+  for (let i = 0; i < 20; i++) {
+    const result = mediator.inspect(packet, { peer: "a", dir: "in", reliable: true });
+    if (result.ok) passed += 1;
+    else {
+      assert.equal(result.code, "join_rate");
+      blocked = true;
+    }
+  }
+  assert.ok(passed <= 11, String(passed));
+  assert.equal(blocked, true);
+});
+
+test("a joined peer that alternates player id is rate limited", () => {
+  const mediator = createMediator({ caps: { joinPerSecond: 8 }, now: () => 0 });
+  assert.equal(mediator.inspect(hello(1), { peer: "a", dir: "in", reliable: true }).ok, true);
+  mediator.inspect(welcome(1), { peer: "a", dir: "out", reliable: true });
+  let blocked = false;
+  for (let i = 0; i < 20; i++) {
+    const result = mediator.inspect(hello(i % 2 === 0 ? 2 : 3), {
+      peer: "a",
+      dir: "in",
+      reliable: true,
+    });
+    if (!result.ok) {
+      assert.equal(result.code, "join_rate");
+      blocked = true;
+    }
+  }
+  assert.equal(blocked, true);
+});
+
+test("bye then hello stays on the join limit", () => {
+  const mediator = createMediator({ caps: { joinPerSecond: 8 }, now: () => 0 });
+  const bye = encodePacket({ tick: 1 }, [{ type: "bye" }]);
+  let blocked = false;
+  for (let i = 0; i < 20; i++) {
+    const helloResult = mediator.inspect(hello(1), { peer: "a", dir: "in", reliable: true });
+    mediator.inspect(bye, { peer: "a", dir: "in", reliable: true });
+    if (!helloResult.ok) {
+      assert.equal(helloResult.code, "join_rate");
+      blocked = true;
+    }
+  }
+  assert.equal(blocked, true);
 });
 
 /** @param {Uint8Array} bytes @param {Record<string, number>} caps */

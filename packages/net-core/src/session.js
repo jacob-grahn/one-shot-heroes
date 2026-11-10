@@ -52,6 +52,7 @@ function blank(options) {
   assertTransport(options.transport);
   const s = shell(options, manifest, byteId(options.playerId));
   wireSession(s);
+  s.nonce = freshSeed();
   s.rng = mulberry32(s.seed);
   s.est = () => (s.isHost ? s.shownTick : s.lastHostTick + (s.steps - s.lastHostAt));
   s.clockTick = () => (s.isHost && s.inUpdate ? s.tick : s.est());

@@ -23,6 +23,7 @@ function writeHello(w, m) {
   w.u8(m.playerId);
   w.u16(m.proto);
   writeShort(w, m.hash);
+  if (m.nonce) w.u32(m.nonce >>> 0);
 }
 
 function writeWelcome(w, m) {

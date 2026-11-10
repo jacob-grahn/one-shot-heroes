@@ -20,7 +20,11 @@ export const READERS = {
 };
 
 function readHello(r) {
-  return { playerId: r.u8(), proto: r.u16(), hash: readShort(r) };
+  const playerId = r.u8();
+  const proto = r.u16();
+  const hash = readShort(r);
+  const nonce = r.left >= 4 ? r.u32() : 0;
+  return { playerId, proto, hash, nonce };
 }
 
 function readWelcome(r) {

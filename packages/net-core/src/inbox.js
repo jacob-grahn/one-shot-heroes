@@ -95,13 +95,57 @@ const HANDLERS = {
 function onHello(s, message, from) {
   if (!s.isHost || s.ended) return;
   const peer = s.peers.get(from);
-  if (peer && peer.live && peer.playerId === message.playerId) return refreshWelcome(s, peer);
+  if (sameSeat(s, peer, message)) return refreshWelcome(s, peer);
+  if (refuseHello(s, from, peer, message)) return;
   if (peer && s.releasePeer) s.releasePeer(from);
-  if (message.proto !== PROTOCOL) return rejectJoin(s, from, 1);
-  if (message.hash !== s.manifest.hash) return rejectJoin(s, from, 2);
-  if (s.players.some((player) => player.id === message.playerId)) return rejectJoin(s, from, 3);
-  if (s.players.length >= s.manifest.maxPlayers) return rejectJoin(s, from, 5);
-  acceptPeer(s, from, message.playerId);
+  const code = helloCode(s, message);
+  if (code) return rejectJoin(s, from, code);
+  acceptPeer(s, from, message.playerId, message.nonce || 0);
+}
+
+/** @param {any} s @param {string} from @param {any} peer @param {any} message */
+function refuseHello(s, from, peer, message) {
+  if (otherSeat(peer, message)) {
+    rejectJoin(s, from, 3);
+    return true;
+  }
+  return fastNonce(s, from, peer, message);
+}
+
+/** @param {any} s @param {any} message */
+function helloCode(s, message) {
+  if (message.proto !== PROTOCOL) return 1;
+  if (message.hash !== s.manifest.hash) return 2;
+  if (s.players.some((player) => player.id === message.playerId)) return 3;
+  if (s.players.length >= s.manifest.maxPlayers) return 5;
+  return 0;
+}
+
+/** A hello from the session we just accepted only needs the welcome repeated. */
+function sameSeat(s, peer, message) {
+  if (!peer || !peer.live || peer.playerId !== message.playerId) return false;
+  const nonce = message.nonce || 0;
+  if (nonce && peer.nonce && nonce !== peer.nonce) return false;
+  return s.now() - (peer.joinedAt || 0) < 1000;
+}
+
+/** @param {any} peer @param {any} message */
+function otherSeat(peer, message) {
+  return !!(peer && peer.live && peer.playerId !== message.playerId);
+}
+
+/** A second new session for this peer id inside one second is ignored. */
+function fastNonce(s, from, peer, message) {
+  if (!peer || !peer.live) return false;
+  const nonce = message.nonce || 0;
+  if (!nonce || !peer.nonce || nonce === peer.nonce) return false;
+  const at = s.rejoinAt && s.rejoinAt.get(from);
+  if (at == null || s.now() - at >= 1000) {
+    if (!s.rejoinAt) s.rejoinAt = new Map();
+    s.rejoinAt.set(from, s.now());
+    return false;
+  }
+  return true;
 }
 
 /** @param {any} s @param {any} message */

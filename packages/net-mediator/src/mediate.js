@@ -1,13 +1,19 @@
 /** Host-page gate in front of a transport. Caps are per peer and per direction. */
 
 import { decodePacket } from "@osh/net-wire";
-import { CAPS } from "./caps.js";
+import { forgetHello, helloBook, helloCharge, pruneHellos, versionBudget } from "./joins.js";
+import {
+  byteLimit,
+  bypass,
+  forgetPeer,
+  lane,
+  noteCeiling,
+  openLane,
+  resolveCaps,
+  takeSpawns,
+} from "./lanes.js";
 import { walk } from "./walk.js";
-
-const MAX_LANES = 64;
-const IDLE_MS = 10000;
-const PENDING_MS = 1500;
-const HOST_AUTH = new Set(["spawn", "despawn", "snap"]);
+import { addBytes, charge, room } from "./window.js";
 
 /** @param {{ caps?: Partial<import("./caps.js").CapTable>, manifest?: { maxEntities?: number }, now?: () => number, onDisconnect?: (peer: string, code: string) => void }} [options] */
 export function createMediator(options) {
@@ -92,25 +98,7 @@ function block(st, ctx, code) {
   return { ok: false, code, disconnect };
 }
 
-const HELLO_FREE = 3;
-
-/** Three free retries per join attempt. Further hellos pay the join limit. */
-function helloCharge(st, bag, n) {
-  if (st.joined.has(bag.ctx.peer)) return true;
-  pruneHellos(st, bag.now);
-  const key = bag.ctx.peer + ":" + bag.ctx.dir;
-  const seen = helloBook(st);
-  const row = seen.get(key);
-  if (row && n === 1 && bag.now - row.at < 1000 && row.free > 0) {
-    row.free -= 1;
-    return true;
-  }
-  if (!charge(bag.side.joins, bag.now, n, st.caps.joinPerSecond)) return false;
-  if (!row || bag.now - row.at >= 1000) seen.set(key, { at: bag.now, free: HELLO_FREE });
-  return true;
-}
-
-/** One version packet per peer per second, charged like a hello. Later ones are dropped. */
+/** One version packet per peer per second, and a global cap across rotating ids. */
 function permitVersion(st, ctx) {
   if (!openLane(st, ctx)) {
     st.violations.push("lanes");
@@ -124,38 +112,23 @@ function permitVersion(st, ctx) {
   const row = seen.get(key);
   if (row && now - row.at < 1000)
     return { ok: false, code: "join_rate", ignore: true, logged: true };
+  if (!versionBudget(st, now)) return { ok: false, code: "join_rate", ignore: true, logged: true };
   const side = lane(st, ctx.peer, ctx.dir);
   if (!charge(side.joins, now, 1, st.caps.joinPerSecond)) return block(st, ctx, "join_rate");
   seen.set(key, { at: now, free: 0 });
   return { ok: true };
 }
 
-/** @param {any} st */
-function helloBook(st) {
-  return st.helloTry || (st.helloTry = new Map());
-}
-
-/** @param {any} st @param {string} peer */
-function forgetHello(st, peer) {
-  const seen = st.helloTry;
-  if (!seen) return;
-  seen.delete(peer + ":in");
-  seen.delete(peer + ":out");
-}
-
-/** @param {any} st @param {number} now */
-function pruneHellos(st, now) {
-  const seen = st.helloTry;
-  if (!seen) return;
-  for (const [key, row] of seen) if (now - row.at > 10000) seen.delete(key);
-}
-
 /** @param {any} st @param {{ side: any, draft: any, ctx: any, size: number }} bag */
 function rates(st, bag) {
   const now = st.now();
   const { side, draft, ctx } = bag;
-  if (draft.joins && !helloCharge(st, { side, ctx, now }, draft.joins))
+  if (draft.joins && !helloCharge(st, { side, ctx, now, helloId: draft.helloId }, draft.joins))
     return block(st, ctx, "join_rate");
+  if (draft.helloId != null) {
+    if (!st.seat) st.seat = new Map();
+    st.seat.set(ctx.peer, draft.helloId);
+  }
   const relay = relayCharge(st, bag, now);
   if (relay) return relay;
   const live = liveAfter(st, draft);
@@ -228,157 +201,6 @@ function applySnap(st, draft) {
   st.entities = draft.snapEntities;
 }
 
-/** Reliable host spawn, snapshot, and despawn may pass the byte window. */
-function bypass(ctx, packet) {
-  return ctx.dir === "out" && ctx.reliable && hostAuth(packet);
-}
-
-/** Other reliable traffic leaves a quarter of the link for unreliable state. */
-function byteLimit(st, ctx, packet) {
-  if (ctx.dir === "out" && ctx.reliable && !hostAuth(packet))
-    return Math.floor(st.caps.bytesPerSecond * 0.75);
-  return st.caps.bytesPerSecond;
-}
-
-/** @param {any} packet */
-function hostAuth(packet) {
-  return packet.messages.every((message) => HOST_AUTH.has(message.type));
-}
-
-/** @param {any} st @param {any} side @param {any} ctx @param {number} n */
-function noteCeiling(st, side, ctx, n) {
-  if (!(ctx.dir === "out" && ctx.reliable)) return false;
-  const now = st.now();
-  addBytes(side.hot, now, n);
-  const cap = st.caps.bytesPerSecond * 2;
-  if (side.hot.sum <= cap) {
-    side.overSince = 0;
-    return false;
-  }
-  if (!side.overSince) side.overSince = now;
-  return now - side.overSince > 1000;
-}
-
-/** @param {{ items: { t: number, n: number }[], sum: number }} win @param {number} now @param {number} n */
-function addBytes(win, now, n) {
-  trim(win, now);
-  win.items.push({ t: now, n });
-  win.sum += n;
-}
-
-/** Lanes are created on demand. Idle peers are dropped even if they joined. */
-function openLane(st, ctx) {
-  sweepIdle(st);
-  if (st.lanes.has(ctx.peer) || ctx.peer === "*") return true;
-  if (st.lanes.size >= MAX_LANES) evictLane(st);
-  return st.lanes.size < MAX_LANES;
-}
-
-/** Joined peers last 10s. A hello the host has not accepted lasts about 1.5s. */
-function sweepIdle(st) {
-  const now = st.now();
-  pruneHellos(st, now);
-  const idle = [];
-  for (const [peer, row] of st.lanes) {
-    if (peer !== "*" && now - row.at >= idleLimit(st, peer)) idle.push(peer);
-  }
-  for (const peer of idle) forgetPeer(st, peer);
-}
-
-/** @param {any} st @param {string} peer */
-function idleLimit(st, peer) {
-  return st.joined.has(peer) ? IDLE_MS : PENDING_MS;
-}
-
-/** @param {{ caps?: Partial<import("./caps.js").CapTable>, manifest?: { maxEntities?: number } }} opts */
-function resolveCaps(opts) {
-  const caps = { ...CAPS, ...(opts.caps || {}) };
-  const fromManifest = opts.manifest && opts.manifest.maxEntities;
-  if (fromManifest == null) return caps;
-  if (opts.caps && opts.caps.maxEntities != null && opts.caps.maxEntities !== fromManifest)
-    throw new Error("mediator maxEntities does not match the manifest");
-  caps.maxEntities = fromManifest;
-  const declared = stringMax(opts.manifest);
-  if (declared > caps.maxString) caps.maxString = declared;
-  return caps;
-}
-
-/** @param {any} manifest */
-function stringMax(manifest) {
-  let n = 0;
-  visit(manifest.custom);
-  visit(manifest.inputs);
-  for (const event of manifest.events || []) visit(event.fields);
-  return n;
-
-  /** @param {any[] | undefined} fields */
-  function visit(fields) {
-    for (const field of fields || []) {
-      if (field.type === "string" && field.max > n) n = field.max;
-      if (field.item) visit([field.item]);
-      if (field.fields) visit(field.fields);
-    }
-  }
-}
-
-/** Evict the oldest pending lane, even inside its grace, so a hello flood cannot fill the table. */
-function evictLane(st) {
-  let oldest = "";
-  let at = Infinity;
-  for (const [peer, row] of st.lanes) {
-    if (st.joined.has(peer)) continue;
-    if (row.at < at) {
-      at = row.at;
-      oldest = peer;
-    }
-  }
-  if (oldest) forgetPeer(st, oldest);
-}
-
-/** Burst of maxEntities, then refill at spawnPerSecond. One legal tick can fill the world. */
-function takeSpawns(st, side, now, n) {
-  const rate = st.caps.spawnPerSecond;
-  const burst = Math.max(st.caps.maxEntities, rate);
-  const bag = side.spawnBurst || (side.spawnBurst = { tokens: burst, at: now });
-  if (now > bag.at) {
-    bag.tokens = Math.min(burst, bag.tokens + ((now - bag.at) / 1000) * rate);
-    bag.at = now;
-  }
-  if (bag.tokens < n) return false;
-  bag.tokens -= n;
-  return true;
-}
-
-/** @param {any} st @param {string} peer */
-function forgetPeer(st, peer) {
-  st.joined.delete(peer);
-  st.lanes.delete(peer);
-  forgetHello(st, peer);
-}
-
-/** @param {any} st @param {string} peer @param {string} dir */
-function lane(st, peer, dir) {
-  let row = st.lanes.get(peer);
-  if (!row) {
-    row = { in: side(), out: side(), at: st.now() };
-    st.lanes.set(peer, row);
-  }
-  row.at = st.now();
-  return row[dir];
-}
-
-function side() {
-  return {
-    bytes: bucket(),
-    spawns: bucket(),
-    joins: bucket(),
-    relay: bucket(),
-    hot: bucket(),
-    snapBytes: 0,
-    overSince: 0,
-  };
-}
-
 /** @param {any} st @param {any} transport */
 function wrap(st, transport) {
   return {
@@ -415,27 +237,4 @@ function forward(st, transport, spec) {
     st.onDisconnect(spec.peer, result.code);
   if (!result.logged) st.violations.push(result.code);
   return false;
-}
-
-function bucket() {
-  return { items: [], sum: 0 };
-}
-
-/** @param {{ items: { t: number, n: number }[], sum: number }} win @param {number} now @param {number} n @param {number} limit */
-function charge(win, now, n, limit) {
-  if (!room(win, now, n, limit)) return false;
-  win.items.push({ t: now, n });
-  win.sum += n;
-  return true;
-}
-
-/** @param {{ items: { t: number, n: number }[], sum: number }} win @param {number} now @param {number} n @param {number} limit */
-function room(win, now, n, limit) {
-  trim(win, now);
-  return win.sum + n <= limit;
-}
-
-/** @param {{ items: { t: number, n: number }[], sum: number }} win @param {number} now */
-function trim(win, now) {
-  while (win.items.length && now - win.items[0].t >= 1000) win.sum -= win.items.shift().n;
 }

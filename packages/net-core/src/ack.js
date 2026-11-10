@@ -58,7 +58,8 @@ function applySeq(peer, seq, tick) {
 function noteSkipped(peer, ack, bits) {
   if (!peer.missed) peer.missed = new Set();
   for (const [seq, pkt] of peer.sent) {
-    if (!skippedSeq(seq, ack, bits)) continue;
+    if (!skippedSeq(seq, ack, bits) || pkt.noted) continue;
+    pkt.noted = true;
     for (const ent of pkt.ents || []) peer.missed.add(ent.id);
   }
 }

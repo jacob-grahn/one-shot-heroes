@@ -82,12 +82,20 @@ test("seeded loss and reorder do not desync", () => {
 });
 
 test("a repeated hello does not rebuild the session", () => {
-  const manifest = defineManifest({ maxPlayers: 2, tickHz: 20 });
+  const manifest = defineManifest({ maxPlayers: 2, tickHz: 20, maxEntities: 400 });
   const net = createNetwork({ seed: 1, latency: 0 });
   const clientEp = net.endpoint("p1");
   const host = createSession({
     manifest,
-    game: quiet,
+    game: {
+      init(world, api) {
+        if (api.isHost) {
+          for (let i = 0; i < 200; i++) world.spawn("box", { x: i });
+        }
+      },
+      update() {},
+      render() {},
+    },
     transport: net.endpoint("p0"),
     playerId: 0,
     peerId: "p0",
