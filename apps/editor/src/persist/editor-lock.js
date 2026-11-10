@@ -44,7 +44,9 @@ export const EditorLock = Object.assign(/** @type {Record<string, any>} */ ({
     try { localStorage.setItem(CLAIM_KEY, JSON.stringify({ id: this.id, t: Date.now() })); } catch (e) { return !this.heartbeatFresh(); }
     await new Promise(r => setTimeout(r, CLAIM_WAIT_MS));
     const c2 = this.readKey(CLAIM_KEY);
-    if (!c2 || c2.id !== this.id || this.heartbeatFresh()) return false; // lost the claim, or a winner is already beating
+    // Lost, or a winner is already beating. A claim we still hold would block the next election for 2 s
+    // (F1: the following trial's first tab then loses and a later tab becomes the editor).
+    if (!c2 || c2.id !== this.id || this.heartbeatFresh()) { if (c2 && c2.id === this.id) this.clearClaim(); return false; }
     this.becomeOwner(); // synchronous with the check: from here on we beat and answer "here"
     return true;
   },
