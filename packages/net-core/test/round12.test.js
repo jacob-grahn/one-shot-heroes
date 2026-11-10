@@ -11,7 +11,7 @@ test("junk hellos do not lock out a joiner or a reload", () => {
   for (const rate of [5, 50]) assert.equal(throughJunk(rate), true, String(rate));
 });
 
-test("seven players fill without a tick over 100 ms", () => {
+test("a 7-player fill grants one seat per host step", () => {
   const manifest = defineManifest({ maxPlayers: 8, maxEntities: 1000, tickHz: 20 });
   const net = createNetwork({ seed: 1, latency: 0 });
   const host = createSession({
@@ -31,12 +31,15 @@ test("seven players fill without a tick over 100 ms", () => {
     isHost: true,
   });
   const clients = [];
+  const seats = [];
   for (let id = 1; id <= 7; id++) {
+    const seat = net.endpoint("p" + id);
+    seats.push(seat);
     clients.push(
       createSession({
         manifest,
         game: quiet,
-        transport: net.endpoint("p" + id),
+        transport: seat,
         playerId: id,
         peerId: "p" + id,
         isHost: false,
@@ -44,22 +47,45 @@ test("seven players fill without a tick over 100 ms", () => {
       }),
     );
   }
+  let joins = 0;
+  const perStep = [];
+  host.net.onPeerJoin(() => {
+    joins += 1;
+  });
   net.advance(1);
-  let worst = 0;
-  for (let tick = 0; tick < 12; tick++) {
-    const started = performance.now();
+  const limit = manifest.maxPlayers + 2;
+  let ticks = 0;
+  for (; ticks < limit; ticks++) {
+    seats.forEach((seat, index) => {
+      seat.send(
+        "p0",
+        encodePacket({ tick: 1, flags: 1 }, [
+          { type: "hello", playerId: index + 1, proto: 4, hash: manifest.hash },
+        ]),
+        true,
+      );
+    });
+    net.advance(1);
+    const before = joins;
     host.step();
-    worst = Math.max(worst, performance.now() - started);
+    perStep.push(joins - before);
     for (const client of clients) client.step();
-    net.advance(20);
+    if (filled(clients)) break;
   }
-  assert.ok(worst < 100, worst.toFixed(1));
-  assert.equal(
-    clients.every((client) => client.joined && client.world.query("box").length === 1000),
-    true,
+  assert.ok(
+    perStep.every((n) => n <= 1),
+    perStep.join(","),
   );
+  assert.ok(perStep.some((n) => n === 1));
+  assert.ok(ticks < limit, String(ticks));
+  assert.equal(filled(clients), true);
   assert.equal(host.ended, false);
 });
+
+/** @param {any[]} clients */
+function filled(clients) {
+  return clients.every((client) => client.joined && client.world.query("box").length === 1000);
+}
 
 /** @param {number} rate */
 function throughJunk(rate) {
