@@ -214,7 +214,7 @@ test("a same-session hello flood does not snapshot 200 entities", () => {
   }
   const before = host.stats.bytes;
   const hello = encodePacket({ tick: 1, flags: 1 }, [
-    { type: "hello", playerId: 1, proto: 3, hash: manifest.hash },
+    { type: "hello", playerId: 1, proto: 4, hash: manifest.hash },
   ]);
   for (let i = 0; i < 20; i++) {
     clientEp.send("p0", hello, true);

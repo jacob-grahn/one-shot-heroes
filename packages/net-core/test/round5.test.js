@@ -122,7 +122,7 @@ test("the same peer id can rejoin after a reload", () => {
   group.clientEp.send(
     "p0",
     encodePacket({ tick: 1, flags: 1 }, [
-      { type: "hello", playerId: 1, proto: 3, hash: group.manifest.hash },
+      { type: "hello", playerId: 1, proto: 4, hash: group.manifest.hash },
     ]),
     true,
   );

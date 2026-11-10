@@ -473,5 +473,5 @@ function duo() {
 
 /** @param {number} playerId @param {string} hash */
 function hello(playerId, hash) {
-  return encodePacket({ tick: 1, flags: 1 }, [{ type: "hello", playerId, proto: 3, hash }]);
+  return encodePacket({ tick: 1, flags: 1 }, [{ type: "hello", playerId, proto: 4, hash }]);
 }

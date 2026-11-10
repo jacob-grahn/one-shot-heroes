@@ -100,7 +100,26 @@ function onHello(s, message, from) {
   if (peer && s.releasePeer) s.releasePeer(from);
   const code = helloCode(s, message);
   if (code) return rejectJoin(s, from, code);
+  if (acceptedRecently(s, from)) return;
   acceptPeer(s, from, message.playerId, message.nonce || 0);
+}
+
+/** At most one full accept per peer id per second. The mark survives bye and release. */
+function acceptedRecently(s, from) {
+  const now = s.now();
+  if (!s.acceptAt) s.acceptAt = new Map();
+  const at = s.acceptAt.get(from);
+  if (at != null && now - at < 1000) return true;
+  pruneStamps(s.acceptAt, now);
+  pruneStamps(s.rejoinAt, now);
+  s.acceptAt.set(from, now);
+  return false;
+}
+
+/** @param {Map<string, number> | undefined} map @param {number} now */
+function pruneStamps(map, now) {
+  if (!map || map.size <= 256) return;
+  for (const [id, t] of map) if (now - t >= 10000) map.delete(id);
 }
 
 /** @param {any} s @param {string} from @param {any} peer @param {any} message */
@@ -142,6 +161,7 @@ function fastNonce(s, from, peer, message) {
   const at = s.rejoinAt && s.rejoinAt.get(from);
   if (at == null || s.now() - at >= 1000) {
     if (!s.rejoinAt) s.rejoinAt = new Map();
+    pruneStamps(s.rejoinAt, s.now());
     s.rejoinAt.set(from, s.now());
     return false;
   }

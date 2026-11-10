@@ -152,7 +152,7 @@ test("byte and join windows are per peer and per direction", () => {
   assert.equal(joins.inspect(hello(3), { peer: "b", dir: "in" }).ok, true);
   const burst = encodePacket(
     { tick: 1 },
-    Array.from({ length: 9 }, (_, n) => ({ type: "hello", playerId: n, proto: 3, hash: "abcd" })),
+    Array.from({ length: 9 }, (_, n) => ({ type: "hello", playerId: n, proto: 4, hash: "abcd" })),
   );
   assert.equal(
     createMediator({ now: () => 0 }).inspect(burst, { peer: "c", dir: "in" }).code,
@@ -211,6 +211,45 @@ test("bye then hello stays on the join limit", () => {
   assert.equal(blocked, true);
 });
 
+test("bye and hello in one packet lets at most 8 through", () => {
+  const mediator = createMediator({ now: () => 0 });
+  mediator.inspect(welcome(1), { peer: "a", dir: "out", reliable: true });
+  let passed = 0;
+  let blocked = false;
+  for (let i = 0; i < 20; i++) {
+    const helloMsg = { type: "hello", playerId: 1, proto: 4, hash: "abcd" };
+    const messages = i % 2 === 0 ? [{ type: "bye" }, helloMsg] : [helloMsg, { type: "bye" }];
+    const result = mediator.inspect(encodePacket({ tick: 1 }, messages), {
+      peer: "a",
+      dir: "in",
+      reliable: true,
+    });
+    if (result.ok) {
+      passed += 1;
+      mediator.inspect(welcome(1), { peer: "a", dir: "out", reliable: true });
+    } else {
+      assert.equal(result.code, "join_rate");
+      blocked = true;
+    }
+  }
+  assert.ok(passed <= 8, String(passed));
+  assert.equal(blocked, true);
+});
+
+test("expired join holds are dropped", () => {
+  let now = 0;
+  const mediator = createMediator({ now: () => now });
+  const bye = encodePacket({ tick: 1 }, [{ type: "bye" }]);
+  for (let i = 0; i < 100; i++) {
+    mediator.inspect(hello(1), { peer: "p" + i, dir: "in", reliable: true });
+    mediator.inspect(bye, { peer: "p" + i, dir: "in", reliable: true });
+  }
+  assert.ok(mediator.holdSize() >= 100, String(mediator.holdSize()));
+  now = 10000;
+  mediator.inspect(hello(1), { peer: "fresh", dir: "in", reliable: true });
+  assert.ok(mediator.holdSize() <= 1, String(mediator.holdSize()));
+});
+
 /** @param {Uint8Array} bytes @param {Record<string, number>} caps */
 function inspect(bytes, caps) {
   return createMediator({ caps, now: () => 0 }).inspect(bytes);
@@ -257,7 +296,7 @@ function snap(total) {
 
 /** @param {number} id */
 function hello(id) {
-  return encodePacket({ tick: 1 }, [{ type: "hello", playerId: id, proto: 3, hash: "abcd" }]);
+  return encodePacket({ tick: 1 }, [{ type: "hello", playerId: id, proto: 4, hash: "abcd" }]);
 }
 
 /** @param {number} id */

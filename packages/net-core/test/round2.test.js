@@ -70,7 +70,7 @@ function pkt(messages) {
 
 /** @param {any} group @param {number} id @param {any} [ep] */
 function join(group, id, ep = group.atk) {
-  ep.send("p0", pkt([{ type: "hello", playerId: id, proto: 3, hash: group.spec.hash }]), true);
+  ep.send("p0", pkt([{ type: "hello", playerId: id, proto: 4, hash: group.spec.hash }]), true);
   group.run(3);
 }
 
@@ -254,7 +254,7 @@ test("dropPeer forgets the mediator lane so a later peer can join", () => {
   for (let i = 0; i < 63; i++) {
     const peer = "x" + i;
     const hello = encodePacket({ tick: 1, flags: 1 }, [
-      { type: "hello", playerId: i + 2, proto: 3, hash: "abcd" },
+      { type: "hello", playerId: i + 2, proto: 4, hash: "abcd" },
     ]);
     const welcome = encodePacket({ tick: 1 }, [
       { type: "welcome", you: i + 2, seed: 1, hostId: 0, players: [0, i + 2] },
@@ -263,13 +263,13 @@ test("dropPeer forgets the mediator lane so a later peer can join", () => {
     assert.equal(mediator.inspect(welcome, { peer, dir: "out", reliable: true }).ok, true);
   }
   const blocked = mediator.inspect(
-    encodePacket({ tick: 1, flags: 1 }, [{ type: "hello", playerId: 200, proto: 3, hash: "abcd" }]),
+    encodePacket({ tick: 1, flags: 1 }, [{ type: "hello", playerId: 200, proto: 4, hash: "abcd" }]),
     { peer: "extra", dir: "in", reliable: true },
   );
   assert.equal(blocked.code, "lanes");
   host.dropPeer("p1");
   const opened = mediator.inspect(
-    encodePacket({ tick: 1, flags: 1 }, [{ type: "hello", playerId: 200, proto: 3, hash: "abcd" }]),
+    encodePacket({ tick: 1, flags: 1 }, [{ type: "hello", playerId: 200, proto: 4, hash: "abcd" }]),
     { peer: "extra", dir: "in", reliable: true },
   );
   assert.equal(opened.ok, true);

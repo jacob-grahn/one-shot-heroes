@@ -12,4 +12,4 @@ const manifest = defineManifest({
 });
 ```
 
-`PROTOCOL` is 3. A different build fails the handshake with reason `version`.
+`PROTOCOL` is 4. A hello may end with a session nonce. A different build, including protocol 3, fails the handshake with reason `version`.

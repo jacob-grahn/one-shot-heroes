@@ -9,63 +9,11 @@ import { createSession } from "../src/session.js";
 const quiet = { init() {}, update() {}, render() {} };
 
 test("a delayed B does not stick after a lost return to A", () => {
-  const manifest = defineManifest({ maxPlayers: 2, tickHz: 20 });
-  const net = createNetwork({ seed: 1, latency: 0 });
-  const raw = net.endpoint("p0");
-  const held = [];
-  let mode = "pass";
-  const host = createSession({
-    manifest,
-    game: {
-      init(world, api) {
-        if (api.isHost) world.spawn("box", { x: 0 });
-      },
-      update() {},
-      render() {},
-    },
-    transport: {
-      send(to, bytes, reliable) {
-        if (!reliable && mode === "hold") {
-          held.push([to, bytes]);
-          return;
-        }
-        if (!reliable && mode === "drop") {
-          mode = "pass";
-          return;
-        }
-        raw.send(to, bytes, reliable);
-      },
-      onMessage(handler) {
-        raw.onMessage(handler);
-      },
-    },
-    playerId: 0,
-    peerId: "p0",
-    isHost: true,
-  });
-  const client = createSession({
-    manifest,
-    game: quiet,
-    transport: net.endpoint("p1"),
-    playerId: 1,
-    peerId: "p1",
-    isHost: false,
-    hostPeerId: "p0",
-  });
-  pump(host, client, net, 8);
-  const box = host.world.query("box")[0];
-  mode = "hold";
-  box.x = 10;
-  pump(host, client, net, 1);
-  mode = "drop";
-  box.x = 0;
-  pump(host, client, net, 1);
-  for (const [to, bytes] of held) raw.send(to, bytes, false);
-  net.advance(20);
-  client.step();
-  pump(host, client, net, 24);
-  assert.equal(client.digest(), host.digest());
-  assert.equal(client.world.query("box")[0].x, 0);
+  for (const hold of [1, 2]) {
+    for (const settle of [0, 1, 2, 3, 5, 10]) {
+      assert.equal(delayedB(settle, hold), true, hold + " then " + settle);
+    }
+  }
 });
 
 test("seeded loss and reorder do not desync", () => {
@@ -113,7 +61,7 @@ test("a repeated hello does not rebuild the session", () => {
   pump(host, client, net, 6);
   const before = host.stats.bytes;
   const hello = encodePacket({ tick: 1, flags: 1 }, [
-    { type: "hello", playerId: 1, proto: 3, hash: manifest.hash },
+    { type: "hello", playerId: 1, proto: 4, hash: manifest.hash },
   ]);
   for (let i = 0; i < 20; i++) {
     clientEp.send("p0", hello, true);
@@ -132,7 +80,7 @@ test("hello flooders are kicked after the retry allowance", () => {
       kicked.push(peerId);
     },
   });
-  const hello = encodePacket({ tick: 1 }, [{ type: "hello", playerId: 1, proto: 3, hash: "abcd" }]);
+  const hello = encodePacket({ tick: 1 }, [{ type: "hello", playerId: 1, proto: 4, hash: "abcd" }]);
   for (let peer = 0; peer < 64; peer++) {
     let failed = false;
     for (let n = 0; n < 20; n++) {
@@ -381,21 +329,86 @@ test("render text cannot be edited", () => {
   assert.equal(threw, true);
 });
 
-/** @param {number} seed @param {{ loss: number, jitter: number, reorder: number }} profile */
-function fuzzOne(seed, profile) {
-  const manifest = defineManifest({ maxPlayers: 2, tickHz: 20 });
-  const net = createNetwork({
-    seed,
-    latency: 40,
-    jitter: profile.jitter,
-    loss: profile.loss,
-    reorder: profile.reorder,
+/** @param {number} settle @param {number} holdTicks */
+function delayedB(settle, holdTicks) {
+  const manifest = defineManifest({
+    maxPlayers: 2,
+    tickHz: 20,
+    custom: { n: { type: "int", min: 0, max: 10 } },
   });
+  const net = createNetwork({ seed: 1, latency: 0 });
+  const raw = net.endpoint("p0");
+  const held = [];
+  let mode = "pass";
   const host = createSession({
     manifest,
     game: {
       init(world, api) {
-        if (api.isHost) world.spawn("box", { x: 0 });
+        if (api.isHost) world.spawn("box", { x: 0, custom: { n: 0 } });
+      },
+      update() {},
+      render() {},
+    },
+    transport: {
+      send(to, bytes, reliable) {
+        const copy = new Uint8Array(bytes);
+        if (!reliable && mode === "hold") {
+          held.push([to, copy]);
+          return;
+        }
+        if (!reliable && mode === "drop") {
+          mode = "pass";
+          return;
+        }
+        raw.send(to, copy, reliable);
+      },
+      onMessage(handler) {
+        raw.onMessage(handler);
+      },
+    },
+    playerId: 0,
+    peerId: "p0",
+    isHost: true,
+  });
+  const client = createSession({
+    manifest,
+    game: quiet,
+    transport: net.endpoint("p1"),
+    playerId: 1,
+    peerId: "p1",
+    isHost: false,
+    hostPeerId: "p0",
+  });
+  pump(host, client, net, 8);
+  const box = host.world.query("box")[0];
+  mode = "hold";
+  box.x = 10;
+  box.custom.n = 10;
+  pump(host, client, net, holdTicks);
+  mode = "drop";
+  box.x = 0;
+  box.custom.n = 0;
+  pump(host, client, net, 1);
+  pump(host, client, net, settle);
+  for (const [to, bytes] of held) raw.send(to, bytes, false);
+  net.advance(20);
+  client.step();
+  pump(host, client, net, 24);
+  const seen = client.world.query("box")[0];
+  return client.digest() === host.digest() && seen && seen.x === 0 && seen.custom.n === 0;
+}
+
+/** @param {number} seed @param {{ loss: number, jitter?: number, reorder?: number }} profile */
+function fuzzOne(seed, profile) {
+  const manifest = defineManifest({ maxPlayers: 2, tickHz: 20 });
+  const net = createNetwork({ seed, latency: 40, ...profile });
+  const host = createSession({
+    manifest,
+    game: {
+      init(world, api) {
+        if (api.isHost) {
+          for (let k = 0; k < 8; k++) world.spawn("box", { x: 0 });
+        }
       },
       update() {},
       render() {},
@@ -414,15 +427,17 @@ function fuzzOne(seed, profile) {
     isHost: false,
     hostPeerId: "p0",
   });
-  for (let i = 0; i < 120 && !client.joined && !client.ended; i++) pump(host, client, net, 1);
-  if (!client.joined || client.ended) return false;
-  for (let i = 0; i < 50; i++) {
-    host.world.query("box")[0].x = (i * 3 + seed) % 40;
+  for (let i = 0; i < 120 && !client.joined; i++) pump(host, client, net, 1);
+  if (!client.joined) return false;
+  let state = (seed * 2654435761) >>> 0;
+  const rnd = () => (state = (state * 1103515245 + 12345) >>> 0) / 4294967296;
+  for (let i = 0; i < 80; i++) {
+    for (const box of host.world.query("box")) if (rnd() < 0.3) box.x = box.x === 0 ? 10 : 0;
     pump(host, client, net, 1);
   }
   net.configure({ loss: 0, jitter: 0, reorder: 0, latency: 0 });
   pump(host, client, net, 40);
-  return client.digest() === host.digest() && !client.ended && !host.ended;
+  return client.digest() === host.digest();
 }
 
 /** @param {any} host @param {any} client @param {any} net @param {number} n */

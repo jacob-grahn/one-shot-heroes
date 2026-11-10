@@ -14,7 +14,7 @@ export function seatChanged(st, bag) {
 
 /** Three free retries per join attempt. A joined peer that changes id still pays. */
 export function helloCharge(st, bag, n) {
-  if (st.joined.has(bag.ctx.peer) && !seatChanged(st, bag)) return true;
+  if (st.joined.has(bag.ctx.peer) && !seatChanged(st, bag) && !bag.bye) return true;
   pruneHellos(st, bag.now);
   const key = bag.ctx.peer + ":" + bag.ctx.dir;
   const seen = helloBook(st);

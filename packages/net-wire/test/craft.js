@@ -1,4 +1,4 @@
-import { createWriter } from "@osh/net-wire";
+import { PROTOCOL, createWriter } from "@osh/net-wire";
 
 /** A spawn whose custom key is hostile. The encoder refuses to build this. */
 export function badKey(key) {
@@ -16,7 +16,7 @@ export function badKey(key) {
   body.i32(1);
   const payload = body.finish();
   const packet = createWriter();
-  packet.u8(3);
+  packet.u8(PROTOCOL);
   packet.u8(0);
   packet.u32(1);
   packet.u16(1);

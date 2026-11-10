@@ -178,7 +178,7 @@ test("an occupied seat inside the silence window is reason seat", () => {
   other.send(
     "p0",
     encodePacket({ tick: 1, flags: 1 }, [
-      { type: "hello", playerId: 1, proto: 3, hash: group.manifest.hash },
+      { type: "hello", playerId: 1, proto: 4, hash: group.manifest.hash },
     ]),
     true,
   );
@@ -203,7 +203,7 @@ test("a full room rejects a new id with reason full", () => {
   extra.send(
     "p0",
     encodePacket({ tick: 1, flags: 1 }, [
-      { type: "hello", playerId: 2, proto: 3, hash: group.manifest.hash },
+      { type: "hello", playerId: 2, proto: 4, hash: group.manifest.hash },
     ]),
     true,
   );

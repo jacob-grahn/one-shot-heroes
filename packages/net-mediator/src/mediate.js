@@ -41,6 +41,9 @@ export function createMediator(options) {
     wrap(transport) {
       return wrap(st, transport);
     },
+    holdSize() {
+      return st.joinHold ? st.joinHold.size : 0;
+    },
   };
 }
 
@@ -123,7 +126,10 @@ function permitVersion(st, ctx) {
 function rates(st, bag) {
   const now = st.now();
   const { side, draft, ctx } = bag;
-  if (draft.joins && !helloCharge(st, { side, ctx, now, helloId: draft.helloId }, draft.joins))
+  if (
+    draft.joins &&
+    !helloCharge(st, { side, ctx, now, helloId: draft.helloId, bye: !!draft.bye }, draft.joins)
+  )
     return block(st, ctx, "join_rate");
   if (draft.helloId != null) {
     if (!st.seat) st.seat = new Map();
