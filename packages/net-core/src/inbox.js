@@ -136,7 +136,6 @@ function reasonOf(code) {
 /** @param {any} s @param {string} from @param {number} code */
 function rejectJoin(s, from, code) {
   rejectPeer(s, from, code);
-  if (s.fireLeave) s.fireLeave({ peerId: from, reason: reasonOf(code) });
 }
 
 /** A packet from another build cannot be applied. End that side instead of ignoring it. */
@@ -205,7 +204,9 @@ function onBye(s, _message, from) {
 /** @param {any} s @param {string} from */
 function heard(s, from) {
   const peer = s.peers.get(from);
-  if (peer) peer.lastHeard = s.tick;
+  if (!peer) return;
+  peer.lastHeard = s.tick;
+  peer.heardTick = s.silenceTick || 0;
 }
 
 /** @param {any} s @param {any} message @param {string} _from @param {number} tick */

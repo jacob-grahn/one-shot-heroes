@@ -1,24 +1,19 @@
 /** Host-authoritative session. Clients send inputs and render; they do not run update. */
 
-import { noteAnims, stampAnims } from "./anim.js";
 import { createNet } from "./api.js";
-import { drain } from "./inbox.js";
-import { inputsFor, pruneInputs, pushHist, rememberLocal } from "./input.js";
+import { digestOf, runStep } from "./drive.js";
 import { createLink } from "./peer.js";
 import { renderFrame } from "./render.js";
 import {
   announce,
   assertWelcome,
-  flushReliable,
   rejectPeer,
   sendBye,
-  sendClient,
   sendDirect,
   sendHello,
   trackDespawn,
   trackSpawn,
 } from "./relay.js";
-import { refreshSlots, sendDirty } from "./state-send.js";
 import { mulberry32 } from "./rng.js";
 import { finish, fireEnd, fireJoin, fireLeave } from "./lifecycle.js";
 import { PROTOCOL, canon, decodePacket, defineManifest, quantize } from "./wire.js";
@@ -27,7 +22,12 @@ import { createWorld } from "./world.js";
 /** @param {Record<string, any>} options */
 export function createSession(options) {
   const opts = options || {};
-  if (!opts.game || typeof opts.game.init !== "function" || typeof opts.game.update !== "function")
+  if (
+    !opts.game ||
+    typeof opts.game.init !== "function" ||
+    typeof opts.game.update !== "function" ||
+    typeof opts.game.render !== "function"
+  )
     throw new Error("createSession needs a game with init, update, and render");
   if (!opts.isHost && !opts.hostPeerId)
     throw new Error("client needs hostPeerId; pass isHost: true to host the room");
@@ -37,18 +37,38 @@ export function createSession(options) {
   s.net = createNet(s);
   s.sendDirect = (message) => sendDirect(s, message);
   listen(s);
-  if (!s.isHost) sendHello(s);
+  if (!s.isHost) {
+    sendHello(s);
+    s.helloGap = s.manifest.tickHz;
+    s.nextHello = s.helloGap;
+  }
   s.game.init(s.world, s.net);
   return facade(s);
 }
 
 /** @param {Record<string, any>} options */
 function blank(options) {
-  const manifest =
-    options.manifest && options.manifest.hash ? options.manifest : defineManifest(options.manifest);
+  const manifest = manifestOf(options);
   assertTransport(options.transport);
-  const playerId = byteId(options.playerId);
-  const s = {
+  const s = shell(options, manifest, byteId(options.playerId));
+  wireSession(s);
+  s.rng = mulberry32(s.seed);
+  s.est = () => (s.isHost ? s.shownTick : s.lastHostTick + (s.steps - s.lastHostAt));
+  s.clockTick = () => (s.isHost && s.inUpdate ? s.tick : s.est());
+  if (!s.isHost && !s.hostPeerId)
+    throw new Error("client needs hostPeerId; pass isHost: true to host the room");
+  return s;
+}
+
+/** @param {Record<string, any>} options */
+function manifestOf(options) {
+  if (options.manifest && options.manifest.hash) return options.manifest;
+  return defineManifest(options.manifest);
+}
+
+/** @param {Record<string, any>} options @param {any} manifest @param {number} playerId */
+function shell(options, manifest, playerId) {
+  return {
     manifest,
     transport: options.transport,
     playerId,
@@ -57,6 +77,7 @@ function blank(options) {
     hostPeerId: options.hostPeerId || "",
     game: options.game,
     dev: options.dev !== false,
+    now: typeof options.now === "function" ? options.now : () => performance.now(),
     trace: !!options.trace,
     seed: options.seed == null ? freshSeed() : options.seed >>> 0,
     proto: PROTOCOL,
@@ -95,19 +116,14 @@ function blank(options) {
     sink: null,
     stats: freshStats(),
   };
-  wireSession(s);
-  s.rng = mulberry32(s.seed);
-  s.est = () => (s.isHost ? s.shownTick : s.lastHostTick + (s.steps - s.lastHostAt));
-  s.clockTick = () => (s.isHost && s.inUpdate ? s.tick : s.est());
-  if (!s.isHost && !s.hostPeerId)
-    throw new Error("client needs hostPeerId; pass isHost: true to host the room");
-  return s;
 }
 
 /** @param {any} s */
 function wireSession(s) {
   if (s.isHost) s.players.push({ id: s.playerId, host: true });
   assertWelcome(s);
+  s.quantize = quantize;
+  s.canon = canon;
   s.dropPeer = (peerId) => leave(s, peerId, "dropped");
   s.releasePeer = (peerId) => leave(s, peerId, "replaced");
   s.dropFor = (peerId, reason) => leave(s, peerId, reason);
@@ -232,7 +248,8 @@ function leave(s, peerId, reason) {
   s.epochs.delete(peer.playerId);
   if (code) forget(s, peerId);
   announce(s);
-  if (s.fireLeave) s.fireLeave({ peerId, reason: reason || "replaced" });
+  if (peer.live && s.fireLeave)
+    s.fireLeave({ playerId: peer.playerId, reason: reason || "replaced" });
   fireEnd(s);
 }
 
@@ -269,7 +286,7 @@ function facade(s) {
       s.pendingLocal = input;
     },
     step() {
-      step(s);
+      runStep(s);
     },
     render(draw) {
       renderFrame(s, draw);
@@ -281,88 +298,9 @@ function facade(s) {
       s.dropPeer(String(peerId));
     },
     digest() {
-      return digest(s);
+      return digestOf(s);
     },
   };
-}
-
-/** @param {any} s */
-function step(s) {
-  if (s.ended) {
-    fireEnd(s);
-    return;
-  }
-  if (s.isHost) stepHost(s);
-  else stepClient(s);
-  fireEnd(s);
-}
-
-/** @param {any} s */
-function stepHost(s) {
-  const t = performance.now();
-  drain(s);
-  sweepSilent(s);
-  rememberLocal(s);
-  const prev = noteAnims(s);
-  runUpdate(s);
-  stampAnims(s, prev);
-  s.stats.phases.other += performance.now() - t;
-  refreshSlots(s);
-  for (const peer of s.peers.values()) sendPeer(s, peer);
-  noteStale(s);
-  pruneInputs(s);
-  s.shownTick = s.tick;
-  s.tick += 1;
-}
-
-/** @param {any} s */
-function runUpdate(s) {
-  s.inUpdate = true;
-  try {
-    s.game.update(1 / s.manifest.tickHz, inputsFor(s), s.world, s.net);
-  } catch (err) {
-    if (customCap(err)) {
-      s.stats.customReverted += 1;
-      warnPartial(s);
-    } else reportUpdate(s, err);
-  } finally {
-    s.inUpdate = false;
-  }
-}
-
-/** @param {any} s @param {unknown} err */
-function reportUpdate(s, err) {
-  s.stats.updateErrors = (s.stats.updateErrors || 0) + 1;
-  const message = err instanceof Error ? err.message : String(err);
-  const warn = s.game && s.game.warn;
-  if (s.dev && typeof warn === "function") warn("update failed: " + message);
-  else if (s.dev) console.warn("update failed: " + message);
-}
-
-/** The oversize write is reverted. Earlier edits in the tick stay, and dev games are told. */
-function warnPartial(s) {
-  const message = "custom data exceeds 1024 bytes; this tick was left partial";
-  const warn = s.game && s.game.warn;
-  if (s.dev && typeof warn === "function") warn(message);
-  else if (s.dev) console.warn(message);
-}
-
-/** @param {any} s @param {any} peer */
-function sendPeer(s, peer) {
-  flushReliable(s, peer);
-  if (peer.live) sendDirty(s, peer);
-}
-
-/** @param {any} s */
-function stepClient(s) {
-  s.steps += 1;
-  drain(s);
-  if (s.pendingLocal) {
-    pushHist(s, s.est(), s.pendingLocal);
-    s.pendingLocal = null;
-  }
-  if (!s.joined && !s.ended && s.steps % 10 === 0) sendHello(s);
-  if (s.joined && !s.ended) sendClient(s);
 }
 
 /** @param {any} s */
@@ -374,59 +312,4 @@ function close(s) {
     } else sendDirect(s, { type: "bye" });
   }
   finish(s, s.reason || "close");
-}
-
-/** Drop a joined peer that has sent nothing for silenceMs of host time. */
-function sweepSilent(s) {
-  const limit = Math.ceil((s.manifest.silenceMs / 1000) * s.manifest.tickHz);
-  for (const peer of [...s.peers.values()]) {
-    if (!peer.live) continue;
-    if (s.tick - (peer.lastHeard || 0) < limit) continue;
-    leave(s, peer.peerId, "dropped");
-  }
-}
-
-/** @param {any} s */
-function noteStale(s) {
-  let stale = 0;
-  for (const peer of s.peers.values()) {
-    for (const at of peer.dirtyAt.values()) {
-      const age = s.tick - at;
-      if (age > stale) stale = age;
-    }
-  }
-  s.stats.staleness = stale;
-}
-
-/** @param {unknown} err */
-function customCap(err) {
-  return !!(err && String(/** @type {Error} */ (err).message).includes("custom data exceeds 1024"));
-}
-
-/** @param {any} s */
-function digest(s) {
-  const rows = [];
-  for (const entity of s.world.query()) {
-    if (entity.local) continue;
-    const q = s.isHost ? quantize(entity, s.manifest.quant) : s.quants.get(entity.id);
-    if (q) rows.push(row(entity, q));
-  }
-  rows.sort((a, b) => a.id - b.id);
-  return rows.map((item) => item.text).join("|");
-}
-
-/** @param {any} entity @param {any} q */
-function row(entity, q) {
-  const text = [
-    entity.id,
-    entity.type,
-    q.x,
-    q.y,
-    q.rotation,
-    q.scale,
-    q.anim,
-    q.animStart,
-    canon(q.custom),
-  ].join(",");
-  return { id: entity.id, text };
 }

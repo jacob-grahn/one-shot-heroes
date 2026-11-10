@@ -37,6 +37,17 @@ function writeMessage(w, message) {
 }
 
 /**
+ * A version refusal any later protocol can read without adopting the sender's version.
+ * Header is 15 bytes (version byte unrestricted), then one reject: type 3, length 1, code 1.
+ * @param {Uint8Array} bytes
+ */
+export function isFrozenRefusal(bytes) {
+  if (!(bytes instanceof Uint8Array) || bytes.length < HEADER_BYTES + 4) return false;
+  if (bytes[14] !== 1 || bytes[15] !== 3) return false;
+  return bytes[16] === 0 && bytes[17] === 1 && bytes[18] === 1;
+}
+
+/**
  * @param {Uint8Array} bytes
  * @returns {(
  *   | { ok: true, version: number, flags: number, tick: number, seq: number, ack: number, ackBits: number, messages: any[] }

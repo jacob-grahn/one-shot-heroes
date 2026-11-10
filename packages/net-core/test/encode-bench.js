@@ -19,6 +19,7 @@ const manifest = defineManifest({
 function bench(mode) {
   customMode = mode;
   flip = 0;
+  bumped = false;
   const net = createNetwork({ seed: 1, latency: 0 });
   const sessions = [];
   for (let i = 0; i < N; i++) {
@@ -78,7 +79,7 @@ function bench(mode) {
     `sessionBytesPerSec=${perSec}`,
     `hostUplinkKiBPerSec=${(perSec / 1024).toFixed(2)}`,
   ].join(" ");
-  return { line, ms, maxPacket: host.stats.maxPacket };
+  return { line, ms, maxPacket: host.stats.maxPacket, perSec };
 }
 
 const game = {
@@ -92,6 +93,12 @@ const game = {
     }
   },
   update(_dt, _inputs, world) {
+    if (customMode === "idle") {
+      if (bumped) return;
+      bumped = true;
+      for (const entity of world.query("mob")) entity.x += 1;
+      return;
+    }
     let n = 0;
     const next = flip ? ALT : TAG;
     for (const entity of world.query("mob")) {
@@ -115,6 +122,7 @@ function plainRequested() {
 
 let customMode = "still";
 let flip = 0;
+let bumped = false;
 
 function runBench() {
   if (plainRequested()) {
@@ -123,13 +131,15 @@ function runBench() {
     if (row.ms > 8 || row.maxPacket > manifest.budget) throw new Error(row.line);
     return;
   }
-  const rows = [bench("still"), bench("30%"), bench("100%"), bench("unique")];
+  const rows = [bench("still"), bench("30%"), bench("100%"), bench("unique"), bench("idle")];
   for (const row of rows) console.log(row.line);
   const gated = rows[1];
   if (gated.ms > 8 || gated.maxPacket > manifest.budget) throw new Error(gated.line);
   const unique = rows[3];
   if (unique && (unique.ms > 14 || unique.maxPacket > manifest.budget))
     throw new Error(unique.line);
+  const idle = rows[4];
+  if (idle && idle.perSec > 8192) throw new Error(idle.line);
   for (const row of rows) {
     if (row.maxPacket > manifest.budget) throw new Error(row.line);
   }

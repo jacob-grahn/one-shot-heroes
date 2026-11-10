@@ -4,7 +4,7 @@ export { PROTOCOL, HEADER_BYTES, MAX_MESSAGES, LIMITS, BAD_KEYS, MSG } from "./d
 export { WireError } from "./error.js";
 export { defineManifest } from "./manifest.js";
 export { checkRecord, checkValue, fieldIssue } from "./schema.js";
-export { encodePacket, decodePacket } from "./packet.js";
+export { encodePacket, decodePacket, isFrozenRefusal } from "./packet.js";
 export {
   quantize,
   fillPose,

@@ -1,6 +1,6 @@
 /** Reliable one-shot events. Peer relays are opt-in and deduped with a sliding window. */
 
-import { encodePacket, fieldIssue, isUserText } from "./wire.js";
+import { encodePacket, fieldIssue, isUserText, userText } from "./wire.js";
 
 const WINDOW = 64;
 
@@ -163,8 +163,7 @@ function specOf(s, name) {
 
 /** @param {unknown} value */
 function copyPayload(value) {
-  if (isUserText(value))
-    return { text: /** @type {{ text: string }} */ (value).text, userContent: true };
+  if (isUserText(value)) return userText(/** @type {{ text: string }} */ (value).text);
   if (Array.isArray(value)) return value.map(copyPayload);
   if (value && typeof value === "object")
     return copyObj(/** @type {Record<string, unknown>} */ (value));

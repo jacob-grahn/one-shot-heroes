@@ -103,7 +103,9 @@ Reliable messages: handshake (`protocol` + game hash), spawn, despawn, `net.emit
 
 The handshake compares `manifest.hash` (FNV-1a of the canonical manifest) and protocol version 3. A protocol mismatch ends that join with reason `version` on the client and drops that peer on the host. A hash mismatch ends it with reason `hash`. Reject codes are 1 version, 2 hash, 3 seat, 4 dropped, and 5 full. If the host leaves, clients end with `host_left`.
 
-The host drops a joined peer that has sent no packet for `manifest.silenceMs` of host time (`tick / tickHz`), default 12000 ms. The clock is the host tick, not the wall clock. A packet still in flight counts when it arrives, so a slow link is silent only while nothing is delivered. A blackout longer than `silenceMs` ends the peer with reason `dropped`. The default therefore keeps a client through a 3 s or 8 s blackout and drops a 15 s blackout unless the manifest sets a longer `silenceMs`. After the drop, the same peer id may hello again.
+A version refusal is frozen so a later protocol can read it without adopting the sender's version byte. The header is 15 bytes (the version byte may differ), then one message: type `3` (reject), big-endian length `1`, code `1`. The mediator forwards a mismatched packet, rate-limited like a hello, instead of dropping it as malformed. The host answers with that refusal. Mixes with protocol 2 or older may still hang; they do not know this layout.
+
+The host drops a joined peer that has sent no packet for `manifest.silenceMs` of host time (`tick / tickHz`), default 12000 ms. The clock is the host tick, not the wall clock, and only ticks the host actually takes in real time: steps closer together than half a tick (a catch-up burst after a freeze) count as one. A packet still in flight counts when it arrives, so a slow link is silent only while nothing is delivered. A blackout longer than `silenceMs` ends the peer with reason `dropped`. The default therefore keeps a client through a 3 s or 8 s blackout and drops a 15 s blackout unless the manifest sets a longer `silenceMs`. After the drop, the same peer id may hello again. A client that is still not joined after `silenceMs` of its own steps ends with reason `timeout`.
 
 ## Change tracking and deltas
 
@@ -161,7 +163,9 @@ const mediator = createMediator({
 
 Protocol version is 3.
 
-`stats.staleness` is the oldest dirty entity, in host ticks, waiting on an ack. If it climbs, call `net.setFocus(playerId, x, y)` so nearby entities win the bandwidth. The unique-custom bench row is a stress case and is gated at 14 ms, not the 8 ms gate used for the 30% row.
+`stats.staleness` is the oldest dirty entity, in host ticks, waiting on an ack from a peer heard recently. It is not reset when the same bytes are resent, so it can pass `starvationK`. A peer that has gone quiet does not pin the number. If it climbs, call `net.setFocus(playerId, x, y)` so nearby entities win the bandwidth. The unique-custom bench row is a stress case and is gated at 14 ms, not the 8 ms gate used for the 30% row. The idle row is a world that changed once and then sat still; it fails above 8 KiB/s of host upload. Unchanged entities are not resent every tick. An in-flight description is resent after `starvationK` ticks without an ack, or immediately when the content changes again.
+
+`net.onJoin` and `net.onPeerJoin` are the same list. Both are called with `{ playerId }` when a peer is accepted. `net.onPeerLeave` is called with `{ playerId, reason }` only after that accept, using the same player id. `net.onEnd` is called once with the reason string after the session has ended. A throw inside any of them is warned and does not escape `step`.
 
 `@osh/net-core/src/wire.js` is the only module that imports `@osh/net-wire`. The codec would otherwise be imported from enough call sites to trip the fan-in gate. The file is a barrel on purpose.
 
@@ -177,7 +181,7 @@ The host loop is not running in a Worker. `@osh/net-core` does not touch the DOM
 
 - Key names are inline strings, not a session dictionary. A dictionary id would be unreadable if the unreliable packet won the race against the reliable definition.
 - Anim ids are `uint16`. The game maps names to ids.
-- Custom keys, inputs, and events must be declared in the manifest. Undeclared keys are not synced.
+- Inputs and events must be declared in the manifest. Undeclared custom keys are still synced; dev builds warn with the key name.
 - Clients speak only to the host.
 - Property tests use a seeded in-repo generator, not a third-party property library.
 - `net.tick` is exposed so a game can stamp `animStart`. The host also stamps it when `anim` changes and `animStart` does not.

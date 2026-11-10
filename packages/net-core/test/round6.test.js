@@ -322,6 +322,8 @@ function duo(opts) {
   const manifest = defineManifest({ maxPlayers: 2, tickHz: 20, silenceMs: opts.silenceMs });
   const net = createNetwork({ seed: 1, latency: 0 });
   const clientEp = net.endpoint("p1");
+  let now = 0;
+  const clock = () => now;
   const host = createSession({
     manifest,
     game: quiet,
@@ -329,6 +331,7 @@ function duo(opts) {
     playerId: 0,
     peerId: "p0",
     isHost: true,
+    now: clock,
   });
   const client = createSession({
     manifest,
@@ -338,7 +341,9 @@ function duo(opts) {
     peerId: "p1",
     isHost: false,
     hostPeerId: "p0",
+    now: clock,
   });
+  const tickMs = 1000 / manifest.tickHz;
   return {
     manifest,
     net,
@@ -347,14 +352,18 @@ function duo(opts) {
     clientEp,
     run(k) {
       for (let i = 0; i < k; i++) {
+        now += tickMs;
         host.step();
         client.step();
-        net.advance(20);
+        net.advance(tickMs);
       }
     },
     blackout(seconds) {
       const steps = Math.round(seconds * manifest.tickHz);
-      for (let i = 0; i < steps; i++) host.step();
+      for (let i = 0; i < steps; i++) {
+        now += tickMs;
+        host.step();
+      }
     },
   };
 }

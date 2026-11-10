@@ -138,7 +138,7 @@ test("a silent peer is dropped and stops receiving state", () => {
   const group = pair();
   group.run(4);
   const limit = Math.ceil((group.manifest.silenceMs / 1000) * group.manifest.tickHz) + 2;
-  for (let i = 0; i < limit; i++) group.host.step();
+  group.hostOnly(limit);
   group.net.advance(20);
   group.client.step();
   assert.equal(group.client.reason, "dropped");
@@ -403,6 +403,9 @@ function pair(hooks) {
   const manifest = defineManifest({ maxPlayers: 2, tickHz: 20 });
   const net = createNetwork({ seed: 1, latency: 0 });
   const clientEp = net.endpoint("p1");
+  let now = 0;
+  const clock = () => now;
+  const tickMs = 1000 / manifest.tickHz;
   const host = createSession({
     manifest,
     game: quiet,
@@ -410,6 +413,7 @@ function pair(hooks) {
     playerId: 0,
     peerId: "p0",
     isHost: true,
+    now: clock,
   });
   const client = createSession({
     manifest,
@@ -423,6 +427,7 @@ function pair(hooks) {
     peerId: "p1",
     isHost: false,
     hostPeerId: "p0",
+    now: clock,
   });
   return {
     manifest,
@@ -432,9 +437,16 @@ function pair(hooks) {
     clientEp,
     run(k) {
       for (let i = 0; i < k; i++) {
+        now += tickMs;
         host.step();
         client.step();
-        net.advance(20);
+        net.advance(tickMs);
+      }
+    },
+    hostOnly(k) {
+      for (let i = 0; i < k; i++) {
+        now += tickMs;
+        host.step();
       }
     },
   };

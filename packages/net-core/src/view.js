@@ -8,6 +8,7 @@ export function readOnly(value, dev) {
 
 /** @param {unknown} value @param {number} depth */
 function cloneView(value, depth) {
+  if (isText(value)) return textBox(/** @type {{ text: string }} */ (value).text);
   if (depth > 8 || !value || typeof value !== "object") return value;
   if (Array.isArray(value)) return value.map((item) => cloneView(item, depth + 1));
   const out = Object.create(null);
@@ -16,9 +17,33 @@ function cloneView(value, depth) {
   return out;
 }
 
+/** Decoded strings are null-prototype copies in a render view unless toString is restored. */
+function isText(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const box = /** @type {{ userContent?: boolean, text?: unknown }} */ (value);
+  return box.userContent === true && typeof box.text === "string" && Object.keys(box).length === 2;
+}
+
+/** @param {string} text */
+function textBox(text) {
+  const box = { text: String(text), userContent: true };
+  Object.defineProperty(box, "toString", {
+    value() {
+      return box.text;
+    },
+  });
+  Object.defineProperty(box, "valueOf", {
+    value() {
+      return box.text;
+    },
+  });
+  return box;
+}
+
 /** @param {any} value */
 function proxy(value) {
   if (!value || typeof value !== "object") return value;
+  if (isText(value)) return value;
   const inner = Array.isArray(value) ? value.map(proxy) : proxyObj(value);
   return new Proxy(inner, HANDLER);
 }

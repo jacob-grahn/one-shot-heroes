@@ -29,15 +29,18 @@ export function createNet(s) {
     on(name, fn) {
       onEvent(s, name, fn);
     },
+    // onJoin and onPeerJoin share one list. Both receive { playerId } after accept.
     onJoin(fn) {
       (s.joiners = s.joiners || []).push(fn);
     },
+    // onEnd receives the reason string once, after the session has ended.
     onEnd(fn) {
       (s.enders = s.enders || []).push(fn);
     },
     onPeerJoin(fn) {
       (s.joiners = s.joiners || []).push(fn);
     },
+    // onPeerLeave receives { playerId, reason } only for a peer that joined.
     onPeerLeave(fn) {
       (s.leavers = s.leavers || []).push(fn);
     },

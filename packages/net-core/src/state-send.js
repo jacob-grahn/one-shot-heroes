@@ -64,7 +64,14 @@ function poseChanged(pose, slot) {
 
 /** Size-check and copy custom only after a write. Unchanged entities keep the last snapshot. */
 function keepCustom(s, slot, entity, prev) {
-  const verdict = commitCustom(entity, prev);
+  let verdict = "skip";
+  try {
+    verdict = commitCustom(entity, prev);
+  } catch (err) {
+    s.stats.customReverted = (s.stats.customReverted || 0) + 1;
+    entity.custom = acceptedCustom(entity);
+    return;
+  }
   if (verdict === "same") return;
   if (verdict === "empty") {
     slot.custom = EMPTY;
@@ -123,16 +130,43 @@ function consider(s, peer, entity) {
   if (entity.local) return null;
   const cur = s.slots.get(entity.id);
   const acked = peer.confirmed.get(entity.id);
-  if (!cur || !acked) return null;
-  if (!peer.ackRev) peer.ackRev = new Map();
-  if (peer.ackRev.get(entity.id) === cur.rev) return null;
-  if ((peer.ver.get(entity.id) || 0) > (acked.version || 0)) return dirtyItem(s, peer, entity, cur);
-  if (samePose(cur, acked.q) && sameCustom(cur.custom, acked.q.custom)) {
-    peer.ackRev.set(entity.id, cur.rev);
-    peer.dirtyAt.delete(entity.id);
-    return null;
-  }
+  if (!cur || !acked || held(peer, entity.id, cur.rev)) return null;
+  if (quiet(s, peer, { id: entity.id, cur, q: acked.q })) return null;
   return dirtyItem(s, peer, entity, cur);
+}
+
+/** @param {any} peer @param {number} id @param {number} rev */
+function held(peer, id, rev) {
+  if (!peer.ackRev) peer.ackRev = new Map();
+  return peer.ackRev.get(id) === rev;
+}
+
+/** True when this description is already sent and not yet due for a retry. */
+function quiet(s, peer, bag) {
+  const sent = peer.sentState && peer.sentState.get(bag.id);
+  const ackMatch = sameContent(bag.cur, bag.q);
+  const sentMatch = sent ? sameContent(bag.cur, sent) : ackMatch;
+  if (ackMatch && sentMatch) return settled(peer, bag.id, bag.cur.rev) === null;
+  return !!(sent && sentMatch && !starved(s, peer, bag.id));
+}
+
+/** Content matches what this peer has already acked. Stop sending it. */
+function settled(peer, id, rev) {
+  peer.ackRev.set(id, rev);
+  peer.dirtyAt.delete(id);
+  return null;
+}
+
+/** An in-flight description is resent only after starvationK ticks with no ack. */
+function starved(s, peer, id) {
+  const at = peer.sentAt && peer.sentAt.get(id);
+  if (at == null) return false;
+  return s.tick - at >= s.manifest.starvationK;
+}
+
+/** @param {any} cur @param {any} q */
+function sameContent(cur, q) {
+  return samePose(cur, q) && sameCustom(cur.custom, q.custom);
 }
 
 /** @param {any} a @param {any} b */
@@ -167,7 +201,15 @@ function dirtyItem(s, peer, entity, cur) {
     s.stats.skipped += 1;
     return null;
   }
-  return itemOf(entity, cur, base, { age: s.tick - peer.dirtyAt.get(entity.id), size: plan.size });
+  return itemOf(entity, cur, base, { age: sendAge(s, peer, entity.id), size: plan.size });
+}
+
+/** Priority age is time since the last send. Staleness keeps the original dirty tick. */
+function sendAge(s, peer, id) {
+  const sent = peer.sentAt && peer.sentAt.get(id);
+  if (sent != null) return s.tick - sent;
+  const at = peer.dirtyAt.get(id);
+  return at == null ? 0 : s.tick - at;
 }
 
 /** One pose-and-custom diff per distinct baseline. Later peers with the same spawn reuse it. */
@@ -288,7 +330,10 @@ function commit(s, peer, item) {
   const version = (peer.ver.get(item.id) || 0) + 1;
   peer.ver.set(item.id, version);
   peer.acc.set(item.id, 0);
-  peer.dirtyAt.set(item.id, s.tick);
+  if (!peer.sentAt) peer.sentAt = new Map();
+  if (!peer.sentState) peer.sentState = new Map();
+  peer.sentAt.set(item.id, s.tick);
+  peer.sentState.set(item.id, freeze(item.cur));
   item.version = version;
   return { id: item.id, version, baseVersion: item.baseVersion, cur: item.cur, base: item.base };
 }

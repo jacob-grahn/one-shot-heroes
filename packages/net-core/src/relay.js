@@ -65,6 +65,9 @@ function clearPeerEntity(s, peer, id) {
   peer.confirmed.delete(id);
   peer.ver.delete(id);
   if (peer.spawnQ) peer.spawnQ.delete(id);
+  if (peer.ackRev) peer.ackRev.delete(id);
+  if (peer.sentState) peer.sentState.delete(id);
+  if (peer.sentAt) peer.sentAt.delete(id);
   peer.acc.delete(id);
   peer.dirtyAt.delete(id);
   if (s.slots) s.slots.delete(id);
@@ -91,6 +94,7 @@ export function acceptPeer(s, from, playerId) {
   s.players.push({ id: playerId, host: false });
   const records = baseline(s, peer);
   peer.lastHeard = s.tick;
+  peer.heardTick = s.silenceTick || 0;
   peer.queue.push(welcomeMessage(s, playerId));
   for (const snap of snapMessages(s, records)) peer.queue.push(snap);
   peer.live = true;

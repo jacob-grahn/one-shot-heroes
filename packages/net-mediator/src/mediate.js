@@ -42,10 +42,12 @@ export function createMediator(options) {
 function inspect(st, bytes, meta) {
   const ctx = context(meta);
   if (!(bytes instanceof Uint8Array)) return block(st, ctx, "malformed");
-  if (bytes.length > CAPS.maxSnapshotBytes) return block(st, ctx, "budget");
+  if (bytes.length > st.caps.maxSnapshotBytes) return block(st, ctx, "budget");
   const packet = decodePacket(bytes);
-  if (packet.ok === false)
+  if (packet.ok === false) {
+    if (packet.error === "version") return permitVersion(st, ctx);
     return block(st, ctx, packet.error === "bad_key" ? "bad_key" : "malformed");
+  }
   if (!openLane(st, ctx)) {
     st.violations.push("lanes");
     return { ok: false, code: "lanes", logged: true };
@@ -90,11 +92,35 @@ function block(st, ctx, code) {
   return { ok: false, code, disconnect };
 }
 
+/** A repeated hello from the same peer inside one second is a retry, not another join. */
+function helloCharge(st, bag, n) {
+  const key = bag.ctx.peer + ":" + bag.ctx.dir;
+  const seen = st.helloAt || (st.helloAt = new Map());
+  const at = seen.get(key);
+  if (at != null && bag.now - at < 1000) return true;
+  if (!charge(bag.side.joins, bag.now, n, st.caps.joinPerSecond)) return false;
+  seen.set(key, bag.now);
+  return true;
+}
+
+/** Version-mismatched bytes are forwarded. The session answers with a frozen refusal. */
+function permitVersion(st, ctx) {
+  if (!openLane(st, ctx)) {
+    st.violations.push("lanes");
+    return { ok: false, code: "lanes", logged: true };
+  }
+  if (ctx.dir === "in" && ctx.reliable) {
+    const side = lane(st, ctx.peer, ctx.dir);
+    if (!helloCharge(st, { side, ctx, now: st.now() }, 1)) return block(st, ctx, "join_rate");
+  }
+  return { ok: true };
+}
+
 /** @param {any} st @param {{ side: any, draft: any, ctx: any, size: number }} bag */
 function rates(st, bag) {
   const now = st.now();
   const { side, draft, ctx } = bag;
-  if (draft.joins && !charge(side.joins, now, draft.joins, st.caps.joinPerSecond))
+  if (draft.joins && !helloCharge(st, { side, ctx, now }, draft.joins))
     return block(st, ctx, "join_rate");
   const relay = relayCharge(st, bag, now);
   if (relay) return relay;

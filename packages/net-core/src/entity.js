@@ -151,7 +151,14 @@ function writeKey(scope, target, key, value) {
     len: Array.isArray(target) ? target.length : -1,
   };
   target[key] = keep(value);
-  if (sealBytes(scope.root) <= CAP) {
+  let len = 0;
+  try {
+    len = sealBytes(scope.root);
+  } catch (err) {
+    restoreKey(target, key, prior);
+    throw err;
+  }
+  if (len <= CAP) {
     dirty.add(scope.entity);
     return true;
   }
