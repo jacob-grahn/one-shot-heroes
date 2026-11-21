@@ -91,15 +91,15 @@ test("a client spawn is host_only and does not spend the room", () => {
 });
 
 test("120 then 30 per second through multi-spawn packets does not kick", () => {
-  const kicks = pace(30, 10);
-  assert.deepEqual(kicks, []);
+  const run = pace(30, 10);
+  assert.deepEqual(run.kicks, []);
+  assert.equal(run.drops, 0);
 });
 
-test("120 then 31 per second through multi-spawn packets is kicked", () => {
-  const kicks = pace(31, 15);
-  assert.ok(kicks.length > 0, "expected a kick");
-  assert.equal(kicks[0].code, "spawn_rate");
-  assert.ok(kicks[0].now >= 800, String(kicks[0].now));
+test("120 then 31 per second is dropped and nobody is kicked", () => {
+  const run = pace(31, 15);
+  assert.deepEqual(run.kicks, []);
+  assert.ok(run.drops > 0, String(run.drops));
 });
 
 /** @param {number} perSecond @param {number} seconds */
@@ -131,7 +131,7 @@ function pace(perSecond, seconds) {
     const base = t % 2 === 0 ? 2 : 1;
     send(perSecond > 30 && t % 20 === 19 ? base + 1 : base);
   }
-  return kicks;
+  return { kicks, drops: mediator.spawnDrops };
 }
 
 /** @param {number[]} ids */

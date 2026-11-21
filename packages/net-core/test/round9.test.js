@@ -179,7 +179,7 @@ test("rotating version ids share one refusal budget", () => {
 });
 
 test("a same-session hello flood does not snapshot 200 entities", () => {
-  const manifest = defineManifest({ maxPlayers: 2, tickHz: 20, maxEntities: 400 });
+  const manifest = defineManifest({ maxPlayers: 2, tickHz: 20, maxEntities: 400, spawnBurst: 200 });
   const net = createNetwork({ seed: 1, latency: 0 });
   const clientEp = net.endpoint("p1");
   const host = createSession({

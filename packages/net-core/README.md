@@ -20,3 +20,7 @@ host.step();
 ```
 
 `game` needs `init`, `update`, and `render`. A client passes `hostPeerId` and `isHost: false`.
+
+## world.spawn
+
+`world.spawn(type, init)` on the host spends one token from the room bucket. The bucket holds `manifest.spawnBurst` (default 120) and refills at `manifest.spawnPerSecond` (default 30). A gap shorter than half a tick does not refill. When fewer than one token is left, `spawn` throws an Error whose `message` and `code` are `"spawn_rate"`. The entity is not created and nothing is sent. Catch it in `update` when the rest of the tick should run. If `update` does not catch it, `step()` records the error and does not rethrow. `session.stats.spawnRefused` counts each refusal. A `{ local: true }` spawn does not use the bucket. The entity cap and the host-only check still throw their own errors.

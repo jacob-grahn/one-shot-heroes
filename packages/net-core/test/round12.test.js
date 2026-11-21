@@ -12,7 +12,12 @@ test("junk hellos do not lock out a joiner or a reload", () => {
 });
 
 test("a 7-player fill grants one seat per host step", () => {
-  const manifest = defineManifest({ maxPlayers: 8, maxEntities: 1000, tickHz: 20 });
+  const manifest = defineManifest({
+    maxPlayers: 8,
+    maxEntities: 1000,
+    spawnBurst: 1000,
+    tickHz: 20,
+  });
   const net = createNetwork({ seed: 1, latency: 0 });
   const host = createSession({
     manifest,

@@ -9,6 +9,7 @@ const ALT = "y" + "x".repeat(139);
 const manifest = defineManifest({
   maxPlayers: N,
   maxEntities: E,
+  spawnBurst: E,
   focus: "none",
   tickHz: 20,
   budget: 1200,

@@ -36,6 +36,9 @@ export function createMediator(options) {
     get violations() {
       return st.violations;
     },
+    get spawnDrops() {
+      return st.spawnDrops || 0;
+    },
     inspect(bytes, meta) {
       return inspect(st, bytes, meta || {});
     },
@@ -76,13 +79,19 @@ function inspect(st, bytes, meta) {
   if (early) return early;
   const rate = rates(st, { side, draft, ctx, size: bytes.length });
   if (rate) return rate;
-  const limited = byteLimit(st, ctx, packet);
-  const over = !room(side.bytes, st.now(), bytes.length, limited);
-  addBytes(side.bytes, st.now(), bytes.length);
-  const ceiling = noteCeiling(st, side, ctx, bytes.length);
-  commit(st, side, draft, ctx);
-  if (ceiling) return block(st, ctx, "reliable_ceiling");
-  if (over && !bypass(ctx, packet)) return block(st, ctx, "bytes");
+  return admit(st, { side, draft, ctx, packet, bytes });
+}
+
+/** @param {any} st @param {{ side: any, draft: any, ctx: any, packet: any, bytes: Uint8Array }} bag */
+function admit(st, bag) {
+  if (bag.draft.omitSpawns && bag.draft.omitSpawns.length) return omitted();
+  const limited = byteLimit(st, bag.ctx, bag.packet);
+  const over = !room(bag.side.bytes, st.now(), bag.bytes.length, limited);
+  addBytes(bag.side.bytes, st.now(), bag.bytes.length);
+  const ceiling = noteCeiling(st, bag.side, bag.ctx, bag.bytes.length);
+  commit(st, bag.side, bag.draft, bag.ctx);
+  if (ceiling) return block(st, bag.ctx, "reliable_ceiling");
+  if (over && !bypass(bag.ctx, bag.packet)) return block(st, bag.ctx, "bytes");
   return { ok: true };
 }
 
@@ -151,13 +160,26 @@ function rates(st, bag) {
   }
   const relay = relayCharge(st, bag, now);
   if (relay) return relay;
+  const fresh = freshIds(st, draft);
+  draft.fresh = fresh;
   const live = liveAfter(st, draft);
   if (live == null) return block(st, ctx, "entities");
   draft.live = live;
-  const fresh = freshIds(st, draft);
-  if (fresh.length && !takeSpawns(st, side, now, fresh.length)) return block(st, ctx, "spawn_rate");
-  draft.fresh = fresh;
+  if (fresh.length && !takeSpawns(st, side, now, fresh.length)) noteOmit(st, draft, fresh);
   return null;
+}
+
+/** Drop the packet's new spawns. The decoded body cannot be rebuilt, so the whole packet goes. */
+function noteOmit(st, draft, fresh) {
+  draft.omitSpawns = fresh;
+  draft.fresh = [];
+  draft.live -= fresh.length;
+  st.spawnDrops = (st.spawnDrops || 0) + fresh.length;
+  st.violations.push("spawn_rate");
+}
+
+function omitted() {
+  return { ok: false, code: "spawn_rate", logged: true, quiet: true };
 }
 
 /** Charge fan-out to the sender. Each sender may relay at most 1/8 of the byte cap. */
@@ -178,7 +200,7 @@ function liveAfter(st, draft) {
   if (draft.snapEntities != null)
     return draft.snapEntities <= st.caps.maxEntities ? draft.snapEntities : null;
   const leaving = draft.despawnIds.filter((id) => st.seenSpawns.has(id));
-  const fresh = freshIds(st, draft);
+  const fresh = draft.fresh || [];
   const live = st.entities - leaving.length + fresh.length;
   return live <= st.caps.maxEntities ? live : null;
 }
@@ -225,11 +247,23 @@ function applySnap(st, draft) {
 function wrap(st, transport) {
   return {
     send(to, bytes, reliable) {
-      forward(st, transport, { peer: String(to), bytes, reliable: !!reliable, dir: "out" });
+      forward(st, transport, {
+        peer: String(to),
+        bytes,
+        reliable: !!reliable,
+        dir: "out",
+      });
     },
     onMessage(handler) {
       transport.onMessage((from, bytes, reliable) => {
-        if (forward(st, transport, { peer: from, bytes, reliable: !!reliable, dir: "in" }))
+        if (
+          forward(st, transport, {
+            peer: from,
+            bytes,
+            reliable: !!reliable,
+            dir: "in",
+          })
+        )
           handler(from, bytes, reliable);
       });
     },
@@ -248,7 +282,7 @@ function wrap(st, transport) {
 /** @param {any} st @param {any} transport @param {{ peer: string, bytes: Uint8Array, reliable: boolean, dir: string }} spec */
 function forward(st, transport, spec) {
   const result = inspect(st, spec.bytes, spec);
-  if (result.ignore) return false;
+  if (result.ignore || result.quiet) return false;
   if (result.ok) {
     if (spec.dir === "out") transport.send(spec.peer, spec.bytes, spec.reliable);
     return true;

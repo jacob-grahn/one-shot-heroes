@@ -304,6 +304,7 @@ test("a snapshot larger than 64 KiB still lets a late joiner in", () => {
   const manifest = defineManifest({
     maxPlayers: 2,
     maxEntities: 400,
+    spawnBurst: 400,
     custom: { tag: { type: "string", max: 200 } },
   });
   const stem = "z".repeat(170);

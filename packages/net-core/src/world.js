@@ -2,9 +2,16 @@
 
 import { createEntity } from "./entity.js";
 
-/** @param {{ canSpawn: (local: boolean) => boolean, canDespawn: () => boolean, onSpawn: (e: any) => void, onDespawn: (e: any) => void, allocId: () => number, entityCap: () => number }} hooks */
+/** @param {{ canSpawn: (local: boolean) => boolean, canDespawn: () => boolean, allowSpawn: () => boolean, onSpawn: (e: any) => void, onDespawn: (e: any) => void, allocId: () => number, entityCap: () => number }} hooks */
 export function createWorld(hooks) {
-  const ctx = { byId: new Map(), list: [], hooks, nextId: 1, localId: 0, liveCount: 0 };
+  const ctx = {
+    byId: new Map(),
+    list: [],
+    hooks,
+    nextId: 1,
+    localId: 0,
+    liveCount: 0,
+  };
   return {
     spawn(type, init, opts) {
       return spawn(ctx, type, init, opts);
@@ -37,11 +44,16 @@ function spawn(ctx, type, init, opts) {
   if (!ctx.hooks.canSpawn(local)) throw new Error("only the host spawns networked entities");
   if (!local && ctx.liveCount >= ctx.hooks.entityCap())
     throw new Error("entity cap is " + ctx.hooks.entityCap());
+  if (!local && !ctx.hooks.allowSpawn()) throw spawnRateError();
   const id = local ? (ctx.localId -= 1) : ctx.hooks.allocId();
   const entity = createEntity(id, type, init, local);
   add(ctx, entity);
   if (!local) ctx.hooks.onSpawn(entity);
   return entity;
+}
+
+function spawnRateError() {
+  return Object.assign(new Error("spawn_rate"), { code: "spawn_rate" });
 }
 
 /** @param {any} ctx @param {any} entity */

@@ -5,7 +5,7 @@ import { createNetwork } from "@osh/net-sim";
 import { createMediator } from "@osh/net-mediator";
 
 test("mediator in front of an 8-player 400-entity session survives loss and churn", () => {
-  const manifest = defineManifest({ maxPlayers: 8 });
+  const manifest = defineManifest({ maxPlayers: 8, spawnBurst: 100000 });
   let move = true;
   let churn = false;
   const game = {

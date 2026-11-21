@@ -136,7 +136,7 @@ test("ids past 65535 are delivered and are not reused", () => {
     },
     render() {},
   };
-  const group = setup(game, defineManifest({ maxPlayers: 2 }), false);
+  const group = setup(game, defineManifest({ maxPlayers: 2, spawnBurst: 100000 }), false);
   burst = 65540;
   assert.doesNotThrow(() => group.run(1));
   group.run(6);
