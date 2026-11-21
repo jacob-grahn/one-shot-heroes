@@ -132,7 +132,7 @@ export function takeSpawns(st, _side, now, n) {
     bag.tokens = Math.min(burst, bag.tokens + (gap / 1000) * rate);
     bag.at = now;
   }
-  if (bag.tokens < n) return false;
+  if (bag.tokens < 1) return false;
   bag.tokens -= n;
   return true;
 }

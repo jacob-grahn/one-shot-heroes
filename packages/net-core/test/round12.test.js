@@ -82,6 +82,72 @@ test("a 7-player fill grants one seat per host step", () => {
   assert.equal(host.ended, false);
 });
 
+test("a queued reload is accepted on the next tick", () => {
+  const manifest = defineManifest({ maxPlayers: 4, tickHz: 20 });
+  let now = 0;
+  const net = createNetwork({ seed: 1, latency: 0 });
+  const host = createSession({
+    manifest,
+    game: quiet,
+    transport: net.endpoint("p0"),
+    playerId: 0,
+    peerId: "p0",
+    isHost: true,
+    now: () => now,
+  });
+  const firstEp = net.endpoint("p1");
+  const first = createSession({
+    manifest,
+    game: quiet,
+    transport: firstEp,
+    playerId: 1,
+    peerId: "p1",
+    isHost: false,
+    hostPeerId: "p0",
+    now: () => now,
+  });
+  for (let i = 0; i < 8 && !first.joined; i++) {
+    now += 50;
+    host.step();
+    first.step();
+    net.advance(50);
+  }
+  assert.equal(first.joined, true);
+  now += 1500;
+  host.step();
+  net.advance(1);
+  const second = createSession({
+    manifest,
+    game: quiet,
+    transport: net.endpoint("p2"),
+    playerId: 2,
+    peerId: "p2",
+    isHost: false,
+    hostPeerId: "p0",
+    now: () => now,
+  });
+  firstEp.send(
+    "p0",
+    encodePacket({ tick: 1, flags: 1 }, [
+      { type: "hello", playerId: 1, proto: 4, hash: manifest.hash, nonce: 0xabc123 },
+    ]),
+    true,
+  );
+  net.advance(1);
+  let joins = 0;
+  host.net.onPeerJoin(() => {
+    joins += 1;
+  });
+  host.step();
+  host.step();
+  second.step();
+  net.advance(20);
+  second.step();
+  assert.equal(second.joined, true);
+  assert.equal(joins, 2);
+  assert.equal(host.ended, false);
+});
+
 /** @param {any[]} clients */
 function filled(clients) {
   return clients.every((client) => client.joined && client.world.query("box").length === 1000);

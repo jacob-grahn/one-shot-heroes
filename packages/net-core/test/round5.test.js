@@ -296,7 +296,7 @@ test("the string cap follows the manifest", () => {
   const manifest = defineManifest({ custom: { name: { type: "string", max: 200 } } });
   const mediator = createMediator({ manifest, now: () => 0 });
   assert.equal(mediator.caps.maxString, 200);
-  const result = mediator.inspect(spawnOf(1, "n".repeat(150)));
+  const result = mediator.inspect(spawnOf(1, "n".repeat(150)), { dir: "out" });
   assert.equal(result.ok, true, result.code);
 });
 

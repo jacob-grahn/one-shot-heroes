@@ -132,6 +132,7 @@ function skipHello(s, peer, message, from) {
 
 /** Keep a valid hello for a later tick. The queue holds at most one per player cap. */
 function holdHello(s, from, message) {
+  if (s.rejoinAt && s.rejoinAt.get(from) === s.now()) s.rejoinAt.delete(from);
   if (!s.pendingHellos) s.pendingHellos = new Map();
   if (s.pendingHellos.has(from) || s.pendingHellos.size < s.manifest.maxPlayers)
     s.pendingHellos.set(from, message);

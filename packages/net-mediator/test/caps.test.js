@@ -9,8 +9,8 @@ const base = defaultState(manifest.quant);
 
 test("mediator enforces every cap, including prototype keys", () => {
   const entities = createMediator({ caps: { maxEntities: 1 }, now: () => 0 });
-  assert.equal(entities.inspect(spawn(1, {})).ok, true);
-  assert.equal(entities.inspect(spawn(2, {})).code, "entities");
+  assert.equal(entities.inspect(spawn(1, {}), { dir: "out" }).ok, true);
+  assert.equal(entities.inspect(spawn(2, {}), { dir: "out" }).code, "entities");
   assert.equal(spawnRate(), "spawn_rate");
   assert.equal(inspect(eventPacket("n".repeat(40), { msg: "a" }), {}).code, "name");
   assert.equal(inspect(eventPacket("chat", fatEvent()), {}).code, "event");
@@ -124,15 +124,15 @@ test("despawn frees a live entity slot", () => {
     now: () => 0,
   });
   for (let n = 1; n <= 5000; n++) {
-    assert.equal(mediator.inspect(spawn(n, {})).ok, true);
-    assert.equal(mediator.inspect(despawn(n)).ok, true);
+    assert.equal(mediator.inspect(spawn(n, {}), { dir: "out" }).ok, true);
+    assert.equal(mediator.inspect(despawn(n), { dir: "out" }).ok, true);
   }
   assert.deepEqual(mediator.violations, []);
   const capped = createMediator({ caps: { maxEntities: 1 }, now: () => 0 });
-  assert.equal(capped.inspect(spawn(1, {})).ok, true);
-  assert.equal(capped.inspect(spawn(2, {})).code, "entities");
-  assert.equal(capped.inspect(despawn(1)).ok, true);
-  assert.equal(capped.inspect(spawn(2, {})).ok, true);
+  assert.equal(capped.inspect(spawn(1, {}), { dir: "out" }).ok, true);
+  assert.equal(capped.inspect(spawn(2, {}), { dir: "out" }).code, "entities");
+  assert.equal(capped.inspect(despawn(1), { dir: "out" }).ok, true);
+  assert.equal(capped.inspect(spawn(2, {}), { dir: "out" }).ok, true);
 });
 
 test("byte and join windows are per peer and per direction", () => {
@@ -252,7 +252,7 @@ test("expired join holds are dropped", () => {
 
 /** @param {Uint8Array} bytes @param {Record<string, number>} caps */
 function inspect(bytes, caps) {
-  return createMediator({ caps, now: () => 0 }).inspect(bytes);
+  return createMediator({ caps, now: () => 0 }).inspect(bytes, { dir: "out" });
 }
 
 /** @param {Uint8Array} bytes @param {number} times @param {string} cap @param {number} limit */
@@ -340,11 +340,11 @@ function spawnRate() {
   });
   let code = "";
   for (let id = 1; id <= 40; id++) {
-    const result = mediator.inspect(spawn(id, {}));
+    const result = mediator.inspect(spawn(id, {}), { dir: "out" });
     if (!result.ok) code = result.code;
   }
-  mediator.inspect(despawn(1));
-  const extra = mediator.inspect(spawn(41, {}));
+  mediator.inspect(despawn(1), { dir: "out" });
+  const extra = mediator.inspect(spawn(41, {}), { dir: "out" });
   if (!extra.ok) code = extra.code;
   return code;
 }

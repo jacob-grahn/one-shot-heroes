@@ -72,8 +72,8 @@ function inspect(st, bytes, meta) {
     despawnIds: [],
     events: 0,
   };
-  const code = walk(st.caps, draft, packet, bytes.length);
-  if (code) return block(st, ctx, code);
+  const early = earlyBlock(st, { draft, packet, bytes, ctx });
+  if (early) return early;
   const rate = rates(st, { side, draft, ctx, size: bytes.length });
   if (rate) return rate;
   const limited = byteLimit(st, ctx, packet);
@@ -84,6 +84,19 @@ function inspect(st, bytes, meta) {
   if (ceiling) return block(st, ctx, "reliable_ceiling");
   if (over && !bypass(ctx, packet)) return block(st, ctx, "bytes");
   return { ok: true };
+}
+
+/** @param {any} st @param {{ draft: any, packet: any, bytes: Uint8Array, ctx: any }} bag */
+function earlyBlock(st, bag) {
+  const code = walk(st.caps, bag.draft, bag.packet, bag.bytes.length);
+  if (code) return block(st, bag.ctx, code);
+  if (bag.ctx.dir === "in" && hostOnly(bag.draft)) return block(st, bag.ctx, "host_only");
+  return null;
+}
+
+/** Spawn, despawn, and snapshots only ever come from the host. @param {any} draft */
+function hostOnly(draft) {
+  return draft.spawnIds.length > 0 || draft.despawnIds.length > 0 || draft.snapEntities != null;
 }
 
 /** @param {{ peer?: string, dir?: string, reliable?: boolean }} meta */

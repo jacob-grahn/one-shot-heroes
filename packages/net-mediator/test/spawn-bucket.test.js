@@ -78,6 +78,73 @@ test("manifest spawn settings are honored and invalid values are rejected", () =
   assert.throws(() => defineManifest({ spawnBurst: -1 }), /spawnBurst/);
 });
 
+test("a client spawn is host_only and does not spend the room", () => {
+  const mediator = createMediator({ manifest: room, now: () => 0 });
+  const client = mediator.inspect(spawn(1), { peer: "c", dir: "in", reliable: true });
+  assert.equal(client.ok, false);
+  assert.equal(client.code, "host_only");
+  for (let id = 1; id <= 120; id++) {
+    const result = mediator.inspect(spawn(id), { peer: "h", dir: "out", reliable: true });
+    assert.equal(result.ok, true, String(id));
+  }
+  assert.equal(mediator.inspect(spawn(121), { peer: "h", dir: "out" }).code, "spawn_rate");
+});
+
+test("120 then 30 per second through multi-spawn packets does not kick", () => {
+  const kicks = pace(30, 10);
+  assert.deepEqual(kicks, []);
+});
+
+test("120 then 31 per second through multi-spawn packets is kicked", () => {
+  const kicks = pace(31, 15);
+  assert.ok(kicks.length > 0, "expected a kick");
+  assert.equal(kicks[0].code, "spawn_rate");
+  assert.ok(kicks[0].now >= 800, String(kicks[0].now));
+});
+
+/** @param {number} perSecond @param {number} seconds */
+function pace(perSecond, seconds) {
+  let now = 0;
+  /** @type {{ code: string, now: number }[]} */
+  const kicks = [];
+  const mediator = createMediator({
+    manifest: defineManifest({ maxEntities: 5000, tickHz: 20 }),
+    now: () => now,
+    onDisconnect(_peer, code) {
+      if (!kicks.length) kicks.push({ code, now });
+    },
+  });
+  const wrapped = mediator.wrap({
+    send() {},
+    onMessage() {},
+  });
+  let id = 1;
+  const send = (count) => {
+    const ids = [];
+    for (let i = 0; i < count; i++) ids.push(id++);
+    wrapped.send("c", many(ids), true);
+  };
+  for (let i = 0; i < 60; i++) send(2);
+  const steps = seconds * 20;
+  for (let t = 0; t < steps && !kicks.length; t++) {
+    now += 50;
+    const base = t % 2 === 0 ? 2 : 1;
+    send(perSecond > 30 && t % 20 === 19 ? base + 1 : base);
+  }
+  return kicks;
+}
+
+/** @param {number[]} ids */
+function many(ids) {
+  return encodePacket(
+    { tick: 1 },
+    ids.map((id) => ({
+      type: "spawn",
+      record: { id, type: "e", version: 0, baseVersion: 0, cur: { ...base, custom: {} }, base },
+    })),
+  );
+}
+
 /** @param {number} id */
 function spawn(id) {
   const cur = { ...base, custom: {} };
