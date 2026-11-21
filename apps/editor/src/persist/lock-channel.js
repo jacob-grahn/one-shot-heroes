@@ -10,7 +10,7 @@ export const channelMethods = {
     if (typeof BroadcastChannel !== 'function') return;
     const ch = new BroadcastChannel('osh-pixel-editor');
     ch.onmessage = e => this.onChannel(e.data, ch);
-    window.addEventListener('pagehide', () => { if (this.owner) { this.clearBeat(); ch.postMessage('bye:' + this.id); } });
+    window.addEventListener('pagehide', () => { this.clearClaim(); if (this.owner) { this.clearBeat(); ch.postMessage('bye:' + this.id); } });
     this.ch = ch;
   },
   onChannel(d, ch) {
