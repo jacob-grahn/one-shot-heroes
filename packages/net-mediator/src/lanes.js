@@ -121,20 +121,37 @@ function evictLane(st) {
   if (oldest) forgetPeer(st, oldest);
 }
 
-/** One room bucket. A gap shorter than half a tick does not refill, matching silence. */
-export function takeSpawns(st, _side, now, n) {
+const TICK_SLACK = 1;
+
+/** Credit from the packet tick. A header may lead wall time by at most one tick. */
+export function takeSpawns(st, clock, n) {
   const rate = st.caps.spawnPerSecond;
   const burst = st.caps.spawnBurst;
-  const bag = st.spawnBucket || (st.spawnBucket = { tokens: burst, at: now });
-  const gap = now - bag.at;
-  const half = 500 / (st.tickHz || 20);
-  if (gap >= half) {
-    bag.tokens = Math.min(burst, bag.tokens + (gap / 1000) * rate);
-    bag.at = now;
+  const hz = st.tickHz || 20;
+  const now = clock.now;
+  const header = Number.isFinite(clock.tick) ? clock.tick : Math.floor((now * hz) / 1000);
+  const bag = st.spawnBucket || (st.spawnBucket = freshBag(burst, header, now));
+  const at = tickCap(bag, header, now, hz);
+  if (at > bag.tick) {
+    bag.tokens = Math.min(burst, bag.tokens + ((at - bag.tick) * rate) / hz);
+    bag.tick = at;
   }
-  if (bag.tokens < 1) return false;
+  if (bag.tokens < 1 - rate / 4) return false;
   bag.tokens -= n;
   return true;
+}
+
+/** @param {number} burst @param {number} tick @param {number} now */
+function freshBag(burst, tick, now) {
+  return { tokens: burst, tick, originTick: tick, originWall: now };
+}
+
+/** @param {{ tick: number, originTick: number, originWall: number }} bag @param {number} header @param {number} now @param {number} hz */
+function tickCap(bag, header, now, hz) {
+  const elapsed = Math.max(0, now - bag.originWall);
+  const maxTick = bag.originTick + (elapsed * hz) / 1000 + TICK_SLACK;
+  if (header <= bag.tick) return bag.tick;
+  return header < maxTick ? header : maxTick;
 }
 
 /** @param {any} st @param {string} peer */

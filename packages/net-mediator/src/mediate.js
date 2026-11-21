@@ -62,7 +62,7 @@ function inspect(st, bytes, meta) {
     return block(st, ctx, packet.error === "bad_key" ? "bad_key" : "malformed");
   }
   if (!openLane(st, ctx)) {
-    st.violations.push("lanes");
+    noteViolation(st, "lanes");
     return { ok: false, code: "lanes", logged: true };
   }
   const side = lane(st, ctx.peer, ctx.dir);
@@ -77,7 +77,7 @@ function inspect(st, bytes, meta) {
   };
   const early = earlyBlock(st, { draft, packet, bytes, ctx });
   if (early) return early;
-  const rate = rates(st, { side, draft, ctx, size: bytes.length });
+  const rate = rates(st, { side, draft, ctx, size: bytes.length, tick: packet.tick });
   if (rate) return rate;
   return admit(st, { side, draft, ctx, packet, bytes });
 }
@@ -105,7 +105,14 @@ function earlyBlock(st, bag) {
 
 /** Spawn, despawn, and snapshots only ever come from the host. @param {any} draft */
 function hostOnly(draft) {
-  return draft.spawnIds.length > 0 || draft.despawnIds.length > 0 || draft.snapEntities != null;
+  return (
+    draft.spawnIds.length > 0 ||
+    draft.despawnIds.length > 0 ||
+    draft.snapEntities != null ||
+    draft.state ||
+    draft.welcome ||
+    draft.reject
+  );
 }
 
 /** @param {{ peer?: string, dir?: string, reliable?: boolean }} meta */
@@ -127,7 +134,7 @@ function block(st, ctx, code) {
 /** One version packet per peer per second, and a global cap across rotating ids. */
 function permitVersion(st, ctx) {
   if (!openLane(st, ctx)) {
-    st.violations.push("lanes");
+    noteViolation(st, "lanes");
     return { ok: false, code: "lanes", logged: true };
   }
   if (ctx.dir !== "in") return { ok: true };
@@ -145,7 +152,7 @@ function permitVersion(st, ctx) {
   return { ok: true };
 }
 
-/** @param {any} st @param {{ side: any, draft: any, ctx: any, size: number }} bag */
+/** @param {any} st @param {{ side: any, draft: any, ctx: any, size: number, tick?: number }} bag */
 function rates(st, bag) {
   const now = st.now();
   const { side, draft, ctx } = bag;
@@ -165,7 +172,8 @@ function rates(st, bag) {
   const live = liveAfter(st, draft);
   if (live == null) return block(st, ctx, "entities");
   draft.live = live;
-  if (fresh.length && !takeSpawns(st, side, now, fresh.length)) noteOmit(st, draft, fresh);
+  if (fresh.length && !takeSpawns(st, { now, tick: bag.tick }, fresh.length))
+    noteOmit(st, draft, fresh);
   return null;
 }
 
@@ -175,7 +183,15 @@ function noteOmit(st, draft, fresh) {
   draft.fresh = [];
   draft.live -= fresh.length;
   st.spawnDrops = (st.spawnDrops || 0) + fresh.length;
-  st.violations.push("spawn_rate");
+  noteViolation(st, "spawn_rate");
+}
+
+const VIOLATION_CAP = 32;
+
+/** @param {any} st @param {string} code */
+function noteViolation(st, code) {
+  st.violations.push(code);
+  if (st.violations.length > VIOLATION_CAP) st.violations.shift();
 }
 
 function omitted() {
@@ -289,6 +305,6 @@ function forward(st, transport, spec) {
   }
   if (spec.dir === "out" && spec.reliable && st.onDisconnect)
     st.onDisconnect(spec.peer, result.code);
-  if (!result.logged) st.violations.push(result.code);
+  if (!result.logged) noteViolation(st, result.code);
   return false;
 }

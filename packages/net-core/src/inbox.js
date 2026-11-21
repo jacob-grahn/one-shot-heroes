@@ -105,6 +105,7 @@ const HANDLERS = {
 /** @param {any} s @param {any} message @param {string} from */
 function onHello(s, message, from) {
   if (!s.isHost || s.ended) return;
+  s.stampedHello = null;
   const peer = s.peers.get(from);
   if (skipHello(s, peer, message, from)) return;
   const code = helloCode(s, message, peer);
@@ -132,7 +133,7 @@ function skipHello(s, peer, message, from) {
 
 /** Keep a valid hello for a later tick. The queue holds at most one per player cap. */
 function holdHello(s, from, message) {
-  if (s.rejoinAt && s.rejoinAt.get(from) === s.now()) s.rejoinAt.delete(from);
+  if (s.stampedHello === from && s.rejoinAt) s.rejoinAt.delete(from);
   if (!s.pendingHellos) s.pendingHellos = new Map();
   if (s.pendingHellos.has(from) || s.pendingHellos.size < s.manifest.maxPlayers)
     s.pendingHellos.set(from, message);
@@ -207,6 +208,7 @@ function fastNonce(s, from, peer, message) {
     if (!s.rejoinAt) s.rejoinAt = new Map();
     pruneStamps(s.rejoinAt, s.now());
     s.rejoinAt.set(from, s.now());
+    s.stampedHello = from;
     return false;
   }
   return true;

@@ -24,7 +24,7 @@ function one(caps, draft, message, size) {
   if (message.type === "despawn") return despawn(draft, message);
   if (message.type === "bye") return bye(draft);
   if (message.type === "snap") return snap(caps, draft, message, size);
-  if (message.type === "state") return records(caps, message.records);
+  if (message.type === "state") return stateMsg(draft, caps, message);
   if (message.type === "input") return samples(caps, message.samples);
   if (message.type === "event") return eventCap(caps, draft, message);
   return "";
@@ -88,6 +88,12 @@ function snap(caps, draft, message, size) {
   draft.snapDone = message.index + 1 === message.count;
   if (!draft.snapIds) draft.snapIds = [];
   for (const record of message.records || []) draft.snapIds.push(record.id);
+  return records(caps, message.records);
+}
+
+/** @param {any} draft @param {any} caps @param {any} message */
+function stateMsg(draft, caps, message) {
+  draft.state = true;
   return records(caps, message.records);
 }
 
