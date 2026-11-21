@@ -5,6 +5,7 @@
  *   bytesPerSecond: number,
  *   maxEntities: number,
  *   spawnPerSecond: number,
+ *   spawnBurst: number,
  *   maxKeys: number,
  *   maxString: number,
  *   maxName: number,
@@ -22,8 +23,9 @@ export const CAPS = Object.freeze({
   bytesPerSecond: 64 * 1024,
   // Same default as defineManifest.maxEntities. Pass manifest to createMediator to copy it.
   maxEntities: 400,
-  // Sustained rate. A single tick may burst up to maxEntities.
+  // Room average. A full bucket may burst spawnBurst spawns, then this rate.
   spawnPerSecond: 30,
+  spawnBurst: 120,
   maxKeys: 16,
   maxString: 128,
   maxName: 32,

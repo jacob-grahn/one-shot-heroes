@@ -66,6 +66,16 @@ function manifestBody(src, focus) {
       max: 100000,
       name: "manifest.maxEntities",
     }),
+    spawnPerSecond: optInt(src.spawnPerSecond, 30, {
+      min: 1,
+      max: 100000,
+      name: "manifest.spawnPerSecond",
+    }),
+    spawnBurst: optInt(src.spawnBurst, 120, {
+      min: 1,
+      max: 100000,
+      name: "manifest.spawnBurst",
+    }),
     avatarType: src.avatarType || "",
     avatarOwnerKey: ownerKey(src.avatarOwnerKey),
     quant: normQuant(src.quant),

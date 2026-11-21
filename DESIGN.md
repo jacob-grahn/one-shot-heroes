@@ -65,7 +65,7 @@ Every value below is the default in `defineManifest` or `CAPS`. Pass a different
 | host leave             | the session ends                      | bye, or the host peer leaving |
 | events                 | reliable `net.emit` / `net.on`        | not replayed to late joiners  |
 | bytes/s                | 64 KiB/s per peer, per direction      | `CAPS.bytesPerSecond`         |
-| spawn rate             | 30/s after a burst of maxEntities     | `CAPS.spawnPerSecond`         |
+| spawn rate             | 30/s average, burst of 120            | `manifest.spawnPerSecond`, `manifest.spawnBurst` |
 | keys per custom object | 16                                    | `CAPS.maxKeys`                |
 | string length          | manifest string max, else 128         | `CAPS.maxString`              |
 | nesting                | 4                                     | `CAPS.maxDepth`               |
@@ -74,6 +74,8 @@ Every value below is the default in `defineManifest` or `CAPS`. Pass a different
 | event name             | 32 characters                         | `CAPS.maxName`                |
 | event payload          | 1024 bytes                            | `CAPS.maxEventBytes`          |
 | event relay            | off unless `relay: true`              | manifest `events`             |
+
+Spawn messages for the whole room share one token bucket. It refills at `manifest.spawnPerSecond` (default 30) in wall time and never holds more than `manifest.spawnBurst` (default 120). A gap shorter than half a tick does not refill it, the same catch-up clamp as the silence check. A spawn with no token is refused with `spawn_rate`; it is not dropped quietly.
 
 Anti-cheat is not a goal. The caps exist to protect players' machines and the TURN bill. Schema validation of inputs (so `update` never sees a value outside the manifest) lives in the engine. The caps live in the mediator.
 

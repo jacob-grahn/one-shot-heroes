@@ -276,16 +276,16 @@ test("mutated packets do not throw or pollute Object.prototype", () => {
   assert.deepEqual(Object.getOwnPropertyNames(Object.prototype).slice(), before);
 });
 
-test("a legal 150-spawn tick does not disconnect anyone", () => {
+test("a legal 120-spawn burst does not disconnect anyone", () => {
   const dropped = [];
   const mediator = createMediator({
-    caps: { spawnPerSecond: 30, maxEntities: 400 },
+    caps: { spawnPerSecond: 30, spawnBurst: 120, maxEntities: 400 },
     now: () => 0,
     onDisconnect(_peer, code) {
       dropped.push(code);
     },
   });
-  for (let id = 1; id <= 150; id++) {
+  for (let id = 1; id <= 120; id++) {
     const result = mediator.inspect(spawnOf(id), { peer: "h", dir: "out", reliable: true });
     assert.equal(result.ok, true, result.code);
   }

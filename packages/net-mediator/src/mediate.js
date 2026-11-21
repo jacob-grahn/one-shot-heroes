@@ -15,11 +15,12 @@ import {
 import { walk } from "./walk.js";
 import { addBytes, charge, room } from "./window.js";
 
-/** @param {{ caps?: Partial<import("./caps.js").CapTable>, manifest?: { maxEntities?: number }, now?: () => number, onDisconnect?: (peer: string, code: string) => void }} [options] */
+/** @param {{ caps?: Partial<import("./caps.js").CapTable>, manifest?: { maxEntities?: number, spawnPerSecond?: number, spawnBurst?: number, tickHz?: number }, now?: () => number, onDisconnect?: (peer: string, code: string) => void }} [options] */
 export function createMediator(options) {
   const opts = options || {};
   const st = {
     caps: resolveCaps(opts),
+    tickHz: (opts.manifest && opts.manifest.tickHz) || 20,
     now: opts.now || (() => Date.now()),
     onDisconnect: opts.onDisconnect || null,
     violations: [],

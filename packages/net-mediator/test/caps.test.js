@@ -120,7 +120,7 @@ test("mediator maxEntities follows the manifest", () => {
 
 test("despawn frees a live entity slot", () => {
   const mediator = createMediator({
-    caps: { maxEntities: 300, spawnPerSecond: 100000, bytesPerSecond: 100000000 },
+    caps: { maxEntities: 300, spawnPerSecond: 100000, spawnBurst: 5000, bytesPerSecond: 100000000 },
     now: () => 0,
   });
   for (let n = 1; n <= 5000; n++) {
@@ -335,7 +335,7 @@ function fat() {
 
 function spawnRate() {
   const mediator = createMediator({
-    caps: { spawnPerSecond: 30, maxEntities: 40 },
+    caps: { spawnPerSecond: 30, spawnBurst: 8, maxEntities: 40 },
     now: () => 0,
   });
   let code = "";

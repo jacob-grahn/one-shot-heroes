@@ -68,17 +68,25 @@ function idleLimit(st, peer) {
   return st.joined.has(peer) ? IDLE_MS : PENDING_MS;
 }
 
-/** @param {{ caps?: Partial<import("./caps.js").CapTable>, manifest?: { maxEntities?: number } }} opts */
+/** @param {{ caps?: Partial<import("./caps.js").CapTable>, manifest?: { maxEntities?: number, spawnPerSecond?: number, spawnBurst?: number } }} opts */
 export function resolveCaps(opts) {
   const caps = { ...CAPS, ...(opts.caps || {}) };
-  const fromManifest = opts.manifest && opts.manifest.maxEntities;
-  if (fromManifest == null) return caps;
-  if (opts.caps && opts.caps.maxEntities != null && opts.caps.maxEntities !== fromManifest)
-    throw new Error("mediator maxEntities does not match the manifest");
-  caps.maxEntities = fromManifest;
-  const declared = stringMax(opts.manifest);
+  const manifest = opts.manifest;
+  if (!manifest) return caps;
+  copyCap(caps, opts.caps, manifest, "maxEntities");
+  copyCap(caps, opts.caps, manifest, "spawnPerSecond");
+  copyCap(caps, opts.caps, manifest, "spawnBurst");
+  const declared = stringMax(manifest);
   if (declared > caps.maxString) caps.maxString = declared;
   return caps;
+}
+
+/** @param {any} caps @param {any} explicit @param {any} manifest @param {string} key */
+function copyCap(caps, explicit, manifest, key) {
+  if (manifest[key] == null) return;
+  if (explicit && explicit[key] != null && explicit[key] !== manifest[key])
+    throw new Error("mediator " + key + " does not match the manifest");
+  caps[key] = manifest[key];
 }
 
 /** @param {any} manifest */
@@ -113,13 +121,15 @@ function evictLane(st) {
   if (oldest) forgetPeer(st, oldest);
 }
 
-/** @param {any} st @param {any} side @param {number} now @param {number} n */
-export function takeSpawns(st, side, now, n) {
+/** One room bucket. A gap shorter than half a tick does not refill, matching silence. */
+export function takeSpawns(st, _side, now, n) {
   const rate = st.caps.spawnPerSecond;
-  const burst = Math.max(st.caps.maxEntities, rate);
-  const bag = side.spawnBurst || (side.spawnBurst = { tokens: burst, at: now });
-  if (now > bag.at) {
-    bag.tokens = Math.min(burst, bag.tokens + ((now - bag.at) / 1000) * rate);
+  const burst = st.caps.spawnBurst;
+  const bag = st.spawnBucket || (st.spawnBucket = { tokens: burst, at: now });
+  const gap = now - bag.at;
+  const half = 500 / (st.tickHz || 20);
+  if (gap >= half) {
+    bag.tokens = Math.min(burst, bag.tokens + (gap / 1000) * rate);
     bag.at = now;
   }
   if (bag.tokens < n) return false;
