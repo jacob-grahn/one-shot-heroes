@@ -9,7 +9,10 @@ import { fileURLToPath } from 'node:url';
 const WS = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const FTA = path.join(WS, 'node_modules/.bin/fta');
 const CONF = path.join(WS, 'tools/gate/fta.json');
-const DIRS = ['apps/editor/src', 'packages/format/src', 'packages/palette/src', 'packages/timing/src'];
+const DIRS = [
+  'apps/editor/src', 'packages/format/src', 'packages/palette/src', 'packages/timing/src',
+  'packages/net-wire/src', 'packages/net-core/src', 'packages/net-sim/src', 'packages/net-mediator/src', 'packages/net-examples/src',
+];
 const mi = (V, G, L) => Math.max(0, (171 - 5.2 * Math.log(Math.max(V, 1)) - 0.23 * G - 16.2 * Math.log(Math.max(L, 1))) * 100 / 171);
 
 const rows = DIRS.flatMap(dir => {
