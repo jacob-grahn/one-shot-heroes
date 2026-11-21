@@ -17,7 +17,7 @@ import {
 import { mulberry32 } from "./rng.js";
 import { finish, fireEnd, fireJoin, fireLeave } from "./lifecycle.js";
 import { PROTOCOL, canon, decodePacket, defineManifest, quantize } from "./wire.js";
-import { takeSpawnToken } from "./spawn-budget.js";
+import { readSpawnBudget, takeSpawnToken } from "./spawn-budget.js";
 import { createWorld } from "./world.js";
 
 /** @param {Record<string, any>} options */
@@ -43,7 +43,12 @@ export function createSession(options) {
     s.helloGap = s.manifest.tickHz;
     s.nextHello = s.helloGap;
   }
-  s.game.init(s.world, s.net);
+  s.inInit = true;
+  try {
+    s.game.init(s.world, s.net);
+  } finally {
+    s.inInit = false;
+  }
   return facade(s);
 }
 
@@ -201,7 +206,8 @@ function byteId(id) {
 function hooks(s) {
   return {
     canSpawn: (local) => local || s.isHost,
-    allowSpawn: () => takeSpawnToken(s),
+    allowSpawn: () => s.inInit || takeSpawnToken(s),
+    spawnBudget: () => readSpawnBudget(s),
     canDespawn: () => s.isHost,
     allocId: () => takeId(s),
     entityCap: () => s.manifest.maxEntities,

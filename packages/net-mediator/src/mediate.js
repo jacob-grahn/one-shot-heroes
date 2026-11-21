@@ -36,9 +36,6 @@ export function createMediator(options) {
     get violations() {
       return st.violations;
     },
-    get spawnDrops() {
-      return st.spawnDrops || 0;
-    },
     inspect(bytes, meta) {
       return inspect(st, bytes, meta || {});
     },
@@ -84,7 +81,6 @@ function inspect(st, bytes, meta) {
 
 /** @param {any} st @param {{ side: any, draft: any, ctx: any, packet: any, bytes: Uint8Array }} bag */
 function admit(st, bag) {
-  if (bag.draft.omitSpawns && bag.draft.omitSpawns.length) return omitted();
   const limited = byteLimit(st, bag.ctx, bag.packet);
   const over = !room(bag.side.bytes, st.now(), bag.bytes.length, limited);
   addBytes(bag.side.bytes, st.now(), bag.bytes.length);
@@ -172,17 +168,14 @@ function rates(st, bag) {
   const live = liveAfter(st, draft);
   if (live == null) return block(st, ctx, "entities");
   draft.live = live;
-  if (fresh.length && !takeSpawns(st, { now, tick: bag.tick }, fresh.length))
-    noteOmit(st, draft, fresh);
+  if (fresh.length && !takeSpawns(st, { now, tick: bag.tick }, fresh.length)) noteSpawn(st, now);
   return null;
 }
 
-/** Drop the packet's new spawns. The decoded body cannot be rebuilt, so the whole packet goes. */
-function noteOmit(st, draft, fresh) {
-  draft.omitSpawns = fresh;
-  draft.fresh = [];
-  draft.live -= fresh.length;
-  st.spawnDrops = (st.spawnDrops || 0) + fresh.length;
+/** Over-budget spawns are forwarded. The log is at most once a second. */
+function noteSpawn(st, now) {
+  if (st.spawnNoted != null && now - st.spawnNoted < 1000) return;
+  st.spawnNoted = now;
   noteViolation(st, "spawn_rate");
 }
 
@@ -192,10 +185,6 @@ const VIOLATION_CAP = 32;
 function noteViolation(st, code) {
   st.violations.push(code);
   if (st.violations.length > VIOLATION_CAP) st.violations.shift();
-}
-
-function omitted() {
-  return { ok: false, code: "spawn_rate", logged: true, quiet: true };
 }
 
 /** Charge fan-out to the sender. Each sender may relay at most 1/8 of the byte cap. */
@@ -298,7 +287,7 @@ function wrap(st, transport) {
 /** @param {any} st @param {any} transport @param {{ peer: string, bytes: Uint8Array, reliable: boolean, dir: string }} spec */
 function forward(st, transport, spec) {
   const result = inspect(st, spec.bytes, spec);
-  if (result.ignore || result.quiet) return false;
+  if (result.ignore) return false;
   if (result.ok) {
     if (spec.dir === "out") transport.send(spec.peer, spec.bytes, spec.reliable);
     return true;

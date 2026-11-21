@@ -338,15 +338,10 @@ function spawnRate() {
     caps: { spawnPerSecond: 30, spawnBurst: 8, maxEntities: 40 },
     now: () => 0,
   });
-  let code = "";
-  for (let id = 1; id <= 40; id++) {
-    const result = mediator.inspect(spawn(id, {}), { dir: "out" });
-    if (!result.ok) code = result.code;
-  }
+  for (let id = 1; id <= 40; id++) mediator.inspect(spawn(id, {}), { dir: "out" });
   mediator.inspect(despawn(1), { dir: "out" });
-  const extra = mediator.inspect(spawn(41, {}), { dir: "out" });
-  if (!extra.ok) code = extra.code;
-  return code;
+  mediator.inspect(spawn(41, {}), { dir: "out" });
+  return mediator.violations.includes("spawn_rate") ? "spawn_rate" : "";
 }
 
 /** @param {string} name @param {any} payload */

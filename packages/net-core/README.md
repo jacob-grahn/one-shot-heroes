@@ -23,4 +23,16 @@ host.step();
 
 ## world.spawn
 
-`world.spawn(type, init)` on the host spends one token from the room bucket. The bucket holds `manifest.spawnBurst` (default 120). Each later game tick adds `spawnPerSecond / tickHz` tokens (default 30 per second). The credit follows `step`'s tick, not the wall clock, so a packet that leaves a few milliseconds early is not a refusal. Below one token, `spawn` throws an Error whose `message` and `code` are `"spawn_rate"`. The entity is not created and nothing is sent. Catch it in `update` when the rest of the tick should run. If `update` does not catch it, `step()` records the error and does not rethrow. `session.stats.spawnRefused` counts each refusal. The 121st spawn in a single tick is refused. A `{ local: true }` spawn does not use the bucket. The entity cap and the host-only check still throw their own errors.
+`world.spawn(type, init)` on the host spends one token from the room bucket. The bucket holds `manifest.spawnBurst` (default 120). Each later game tick adds `spawnPerSecond / tickHz` tokens (default 30 per second). The credit follows `step`'s tick. Below one token, `spawn` throws an Error whose `message` and `code` are `"spawn_rate"`. The entity is not created and nothing is sent. The 121st spawn in a single tick is refused. Spawns inside `init` do not spend the bucket. A `{ local: true }` spawn does not use it either. `world.spawnBudget()` returns how many tokens are available, floored. `session.stats.spawnRefused` counts each refusal. The entity cap and the host-only check still throw their own errors.
+
+```js
+update(_dt, _inputs, world) {
+  try {
+    world.spawn("mob", { x: 1 });
+  } catch (err) {
+    if (!err || err.code !== "spawn_rate") throw err;
+  }
+}
+```
+
+If `update` does not catch `spawn_rate`, `step()` records it and does not rethrow. In dev mode that warning is at most once a second.

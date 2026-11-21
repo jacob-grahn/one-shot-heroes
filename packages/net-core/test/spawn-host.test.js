@@ -48,21 +48,94 @@ test("custom spawn burst and rate are honored on the host and the mediator", () 
   assert.deepEqual(host.play(20, 10), { accepted: 2, refused: 8 });
   const wire = customWire(manifest);
   for (let id = 1; id <= 8; id++) wire.send(id);
-  assert.equal(wire.sent, 5);
-  assert.equal(wire.drops, 3);
+  assert.equal(wire.sent, 8);
+  assert.ok(wire.violations.includes("spawn_rate"));
   assert.deepEqual(wire.kicks, []);
 });
 
-test("a non-conforming host has extra spawns dropped with no kick", () => {
+test("a non-conforming host is logged and still forwarded", () => {
   const run = bypass();
   assert.deepEqual(run.kicks, []);
-  assert.ok(run.drops >= 1);
+  assert.ok(run.violations.includes("spawn_rate"));
   assert.equal(run.clients[0].digest(), run.clients[1].digest());
   for (const client of run.clients) {
     assert.equal(client.ended, false);
-    const count = client.world.query("mob").length;
-    assert.ok(count >= 120 && count < 141, String(count));
-    assert.equal(client.world.get(141), null);
+    assert.equal(client.world.query("mob").length, 141);
+    assert.ok(client.world.get(141));
+  }
+});
+
+test("init can spawn 200 entities without spending the burst", () => {
+  let now = 0;
+  const manifest = defineManifest({ maxPlayers: 3, maxEntities: 400, tickHz: 20 });
+  const kicks = [];
+  const net = createNetwork({ seed: 9, latency: 0 });
+  const mediator = gate(manifest, () => now, kicks);
+  const host = open(
+    manifest,
+    {
+      init(world, api) {
+        if (!api.isHost) return;
+        for (let i = 0; i < 200; i++) world.spawn("box", { x: i });
+      },
+      update() {},
+      render() {},
+    },
+    mediator.wrap(net.endpoint("p0")),
+    0,
+    () => now,
+  );
+  const clients = [1, 2].map((id) => open(manifest, quiet, net.endpoint("p" + id), id, () => now));
+  assert.equal(host.world.query("box").length, 200);
+  assert.equal(host.world.spawnBudget(), manifest.spawnBurst);
+  for (let i = 0; i < 12; i++) turn(host, clients, net, () => (now += 50));
+  assert.deepEqual(kicks, []);
+  assert.equal(mediator.violations.includes("spawn_rate"), false);
+  for (const client of clients) {
+    assert.equal(client.world.query("box").length, 200);
+    assert.equal(client.digest(), host.digest());
+  }
+});
+
+test("spawnBudget reports floored tokens and an uncaught spawn_rate warns once a second", () => {
+  let now = 0;
+  const warns = [];
+  const manifest = defineManifest({ maxPlayers: 1, maxEntities: 1000, tickHz: 20 });
+  const net = createNetwork({ seed: 10, latency: 0 });
+  const host = open(
+    manifest,
+    {
+      init() {},
+      update(_dt, _inputs, world) {
+        for (let i = 0; i < 10; i++) world.spawn("mob", { x: i });
+      },
+      render() {},
+      warn(msg) {
+        warns.push(msg);
+      },
+    },
+    net.endpoint("p0"),
+    0,
+    () => now,
+  );
+  assert.equal(host.world.spawnBudget(), manifest.spawnBurst);
+  for (let i = 0; i < 20; i++) host.step();
+  assert.equal(warns.length, 1);
+  assert.ok(String(warns[0]).includes("spawn_rate"));
+  now += 1000;
+  host.step();
+  assert.equal(warns.length, 2);
+});
+
+test("a stalled catch-up keeps every client with the host", () => {
+  for (const steps of [10, 20, 30]) {
+    const run = stalled(steps);
+    assert.equal(run.violations.includes("spawn_rate"), false, String(steps));
+    assert.deepEqual(run.kicks, []);
+    const hostN = run.host.world.query("mob").length;
+    const clientN = run.client.world.query("mob").length;
+    assert.equal(clientN, hostN, steps + " host " + hostN);
+    assert.equal(run.client.digest(), run.host.digest(), String(steps));
   }
 });
 
@@ -198,8 +271,8 @@ function customWire(manifest) {
     get sent() {
       return sent;
     },
-    get drops() {
-      return mediator.spawnDrops;
+    get violations() {
+      return mediator.violations;
     },
     kicks,
     send(id) {
@@ -238,7 +311,38 @@ function bypass() {
   wrapped.send("p1", extra, true);
   wrapped.send("p2", extra, true);
   for (let i = 0; i < 6; i++) turn(host, clients, net, () => (now += 50));
-  return { kicks, drops: mediator.spawnDrops, clients };
+  return { kicks, violations: mediator.violations, clients };
+}
+
+/** @param {number} steps */
+function stalled(steps) {
+  let now = 0;
+  let phase = "wait";
+  let sent = 0;
+  const manifest = defineManifest({ maxPlayers: 2, maxEntities: 1000, tickHz: 20 });
+  const kicks = [];
+  const net = createNetwork({ seed: 11, latency: 0 });
+  const mediator = gate(manifest, () => now, kicks);
+  const game = {
+    init() {},
+    update(_dt, _inputs, world) {
+      if (phase === "wait" || phase === "done") return;
+      const n = phase === "burst" ? 120 : 1;
+      if (phase !== "burst") sent += 1;
+      for (let i = 0; i < n; i++) world.spawn("mob", { x: sent });
+    },
+    render() {},
+  };
+  const host = open(manifest, game, mediator.wrap(net.endpoint("p0")), 0, () => now);
+  const client = open(manifest, quiet, net.endpoint("p1"), 1, () => now);
+  for (let i = 0; i < 8; i++) turn(host, [client], net, () => (now += 50));
+  phase = "burst";
+  turn(host, [client], net, () => {});
+  phase = "catch";
+  for (let i = 0; i < steps; i++) turn(host, [client], net, () => {});
+  phase = "done";
+  for (let i = 0; i < 10; i++) turn(host, [client], net, () => (now += 50));
+  return { host, client, kicks, violations: mediator.violations };
 }
 
 /** @param {any} world @param {() => void} ok @param {() => void} no */

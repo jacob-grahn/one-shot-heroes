@@ -2,7 +2,7 @@
 
 import { createEntity } from "./entity.js";
 
-/** @param {{ canSpawn: (local: boolean) => boolean, canDespawn: () => boolean, allowSpawn: () => boolean, onSpawn: (e: any) => void, onDespawn: (e: any) => void, allocId: () => number, entityCap: () => number }} hooks */
+/** @param {{ canSpawn: (local: boolean) => boolean, canDespawn: () => boolean, allowSpawn: () => boolean, spawnBudget: () => number, onSpawn: (e: any) => void, onDespawn: (e: any) => void, allocId: () => number, entityCap: () => number }} hooks */
 export function createWorld(hooks) {
   const ctx = {
     byId: new Map(),
@@ -34,6 +34,9 @@ export function createWorld(hooks) {
     },
     get(id) {
       return ctx.byId.get(id) || null;
+    },
+    spawnBudget() {
+      return ctx.hooks.spawnBudget();
     },
   };
 }

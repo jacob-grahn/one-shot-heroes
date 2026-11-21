@@ -83,6 +83,7 @@ function prune(versions, baseVersion) {
 
 /** @param {any} s @param {any} rec @param {number} tick */
 function hold(s, rec, tick) {
+  if (!s.pending.has(rec.id) && s.pending.size >= s.manifest.maxEntities) return;
   const list = s.pending.get(rec.id) || [];
   if (list.some((item) => item.rec.version === rec.version)) return;
   if (list.length >= 8) list.shift();

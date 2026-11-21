@@ -68,9 +68,18 @@ function runUpdate(s) {
 function reportUpdate(s, err) {
   s.stats.updateErrors = (s.stats.updateErrors || 0) + 1;
   const message = err instanceof Error ? err.message : String(err);
+  if (message === "spawn_rate" && !spawnWarnDue(s)) return;
   const warn = s.game && s.game.warn;
   if (s.dev && typeof warn === "function") warn("update failed: " + message);
   else if (s.dev) console.warn("update failed: " + message);
+}
+
+/** @param {any} s */
+function spawnWarnDue(s) {
+  const now = s.now();
+  if (s.spawnWarnAt != null && now - s.spawnWarnAt < 1000) return false;
+  s.spawnWarnAt = now;
+  return true;
 }
 
 /** The oversize write is reverted. Earlier edits in the tick stay, and dev games are told. */

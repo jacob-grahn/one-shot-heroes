@@ -8,14 +8,13 @@ import { createMediator } from "../src/mediate.js";
 const room = defineManifest({ maxEntities: 1000 });
 const base = defaultState(room.quant);
 
-test("one tick allows the burst and refuses once the debt slack is spent", () => {
+test("one tick forwards the burst and logs once the debt slack is spent", () => {
   const mediator = createMediator({ manifest: room, now: () => 0 });
-  let n = 0;
-  while (mediator.inspect(spawn(n + 1, 0), { peer: "a", dir: "out", reliable: true }).ok) n += 1;
+  const n = untilNoted(mediator, (i) => spawn(i + 1, 0), 200);
   const slack = room.spawnPerSecond / 4;
   assert.ok(n >= 120, String(n));
   assert.ok(n <= 120 + slack + 1, String(n));
-  assert.equal(mediator.inspect(spawn(n + 1, 0), { peer: "b", dir: "out" }).code, "spawn_rate");
+  assert.ok(mediator.violations.includes("spawn_rate"));
 });
 
 test("a drained bucket refills at about 30 spawns per second", () => {
@@ -25,10 +24,8 @@ test("a drained bucket refills at about 30 spawns per second", () => {
   const counts = [];
   for (let second = 0; second < 3; second++) {
     now += 1000;
-    let n = 0;
     const tick = gameTick(now);
-    while (mediator.inspect(spawn(1000 + second * 40 + n, tick), { peer: "a", dir: "out" }).ok)
-      n += 1;
+    const n = untilNoted(mediator, (i) => spawn(1000 + second * 40 + i, tick), 80);
     counts.push(n);
   }
   const slack = room.spawnPerSecond / 4 + 1;
@@ -40,9 +37,8 @@ test("four idle seconds refill the bucket to 120 and not past it", () => {
   const mediator = createMediator({ manifest: room, now: () => now });
   for (let id = 1; id <= 120; id++) mediator.inspect(spawn(id), { peer: "a", dir: "out" });
   now += 10000;
-  let n = 0;
   const tick = gameTick(now);
-  while (mediator.inspect(spawn(500 + n, tick), { peer: "a", dir: "out" }).ok) n += 1;
+  const n = untilNoted(mediator, (i) => spawn(500 + i, tick), 200);
   const slack = room.spawnPerSecond / 4 + 1;
   assert.ok(n >= 120 && n <= 120 + slack, String(n));
 });
@@ -50,13 +46,15 @@ test("four idle seconds refill the bucket to 120 and not past it", () => {
 test("a 100 per second attempt averages 30 per second after the burst", () => {
   let now = 0;
   const mediator = createMediator({ manifest: room, now: () => now });
-  let accepted = 0;
+  let noted = -1;
   for (let i = 0; i < 1000; i++) {
-    if (mediator.inspect(spawn(i + 1, gameTick(now)), { peer: "a", dir: "out" }).ok) accepted += 1;
+    const result = mediator.inspect(spawn(i + 1, gameTick(now)), { peer: "a", dir: "out" });
+    assert.equal(result.ok, true, String(i));
+    if (noted < 0 && mediator.violations.includes("spawn_rate")) noted = i;
     now += 10;
   }
-  assert.ok(accepted >= 120 + 30 * 9, String(accepted));
-  assert.ok(accepted <= 120 + 30 * 10 + room.spawnPerSecond / 4 + 2, String(accepted));
+  assert.ok(noted >= 120, String(noted));
+  assert.ok(noted <= 120 + 30 * 10 + room.spawnPerSecond / 4 + 2, String(noted));
 });
 
 test("manifest spawn settings are honored and invalid values are rejected", () => {
@@ -67,13 +65,15 @@ test("manifest spawn settings are honored and invalid values are rejected", () =
   assert.equal(mediator.caps.spawnBurst, 10);
   for (let id = 1; id <= 10; id++)
     assert.equal(mediator.inspect(spawn(id, 0), { peer: "a", dir: "out" }).ok, true);
-  assert.equal(mediator.inspect(spawn(11, 0), { peer: "a", dir: "out" }).ok, true);
-  assert.equal(mediator.inspect(spawn(12, 0), { peer: "a", dir: "out" }).code, "spawn_rate");
+  assert.equal(mediator.violations.includes("spawn_rate"), false);
   now += 1000;
-  let n = 0;
   const tick = gameTick(now);
-  while (mediator.inspect(spawn(20 + n, tick), { peer: "a", dir: "out" }).ok) n += 1;
-  assert.equal(n, 4);
+  for (let id = 20; id < 24; id++)
+    assert.equal(mediator.inspect(spawn(id, tick), { peer: "a", dir: "out" }).ok, true);
+  assert.equal(mediator.violations.includes("spawn_rate"), false);
+  mediator.inspect(spawn(24, tick), { peer: "a", dir: "out" });
+  mediator.inspect(spawn(25, tick), { peer: "a", dir: "out" });
+  assert.ok(mediator.violations.includes("spawn_rate"));
   assert.throws(
     () => createMediator({ manifest, caps: { spawnBurst: 9 }, now: () => 0 }),
     /spawnBurst/,
@@ -108,13 +108,15 @@ test("a client despawn, snapshot, state, welcome, or reject is host_only", () =>
 test("120 then 30 per second through multi-spawn packets does not kick", () => {
   const run = pace(30, 10);
   assert.deepEqual(run.kicks, []);
-  assert.equal(run.drops, 0);
+  assert.equal(run.violations.includes("spawn_rate"), false);
+  assert.equal(run.sent, run.attempts);
 });
 
-test("120 then 31 per second is dropped and nobody is kicked", () => {
+test("120 then 31 per second is logged and still forwarded", () => {
   const run = pace(31, 15);
   assert.deepEqual(run.kicks, []);
-  assert.ok(run.drops > 0, String(run.drops));
+  assert.ok(run.violations.includes("spawn_rate"));
+  assert.equal(run.sent, run.attempts);
 });
 
 /** @param {number} perSecond @param {number} seconds */
@@ -129,15 +131,20 @@ function pace(perSecond, seconds) {
       if (!kicks.length) kicks.push({ code, now });
     },
   });
+  let sent = 0;
   const wrapped = mediator.wrap({
-    send() {},
+    send() {
+      sent += 1;
+    },
     onMessage() {},
   });
   let id = 1;
   let tick = 0;
+  let attempts = 0;
   const send = (count) => {
     const ids = [];
     for (let i = 0; i < count; i++) ids.push(id++);
+    attempts += 1;
     wrapped.send("c", many(ids, tick), true);
   };
   for (let i = 0; i < 60; i++) send(2);
@@ -148,7 +155,7 @@ function pace(perSecond, seconds) {
     const baseCount = t % 2 === 0 ? 2 : 1;
     send(perSecond > 30 && t % 20 === 19 ? baseCount + 1 : baseCount);
   }
-  return { kicks, drops: mediator.spawnDrops };
+  return { kicks, violations: mediator.violations, sent, attempts };
 }
 
 /** @param {number[]} ids */
@@ -213,7 +220,45 @@ test("a burst that arrives 20 ms late still accepts the next tick", () => {
   now = 50;
   run.send(spawn(121, 1));
   assert.deepEqual(run.kicks, []);
-  assert.equal(run.drops, 0);
+  assert.equal(run.violations.includes("spawn_rate"), false);
+});
+
+test("a stall of 500, 1000, or 1500 ms does not log spawn_rate", () => {
+  for (const late of [500, 1000, 1500]) {
+    const run = catchUp(late);
+    assert.equal(run.violations.includes("spawn_rate"), false, String(late));
+    assert.equal(run.kicks.length, 0, String(late));
+    assert.equal(run.sent, 120 + run.extra, late + " " + run.sent);
+  }
+});
+
+test("a 1 Hz wake forwards each second without a spawn_rate log", () => {
+  let now = 0;
+  const run = wire(wide, () => now);
+  let id = 1;
+  for (; id <= 120; id++) run.send(spawn(id, 0));
+  let tick = 0;
+  for (let sec = 0; sec < 3; sec++) {
+    for (let step = 0; step < 20; step++) {
+      tick += 1;
+      const n = step % 2 === 0 ? 2 : 1;
+      for (let i = 0; i < n; i++) run.send(spawn(id++, tick));
+    }
+    now += 1000;
+  }
+  assert.equal(run.violations.includes("spawn_rate"), false);
+  assert.equal(run.kicks.length, 0);
+});
+
+test("tick 0 opens a fresh spawn budget", () => {
+  let now = 0;
+  const run = wire(wide, () => now);
+  for (let id = 1; id <= 120; id++) run.send(spawn(id, 40));
+  now = 5000;
+  for (let id = 200; id < 320; id++) run.send(spawn(id, 0));
+  assert.equal(run.violations.includes("spawn_rate"), false);
+  assert.equal(run.sent, 240);
+  assert.equal(run.kicks.length, 0);
 });
 
 test("late jitter at or under 30/s never kicks or refuses", () => {
@@ -222,7 +267,7 @@ test("late jitter at or under 30/s never kicks or refuses", () => {
       for (let seed = 1; seed <= 40; seed++) {
         const run = jitterRun(average, burst, seed);
         assert.equal(run.kicks, 0, average + " " + burst + " " + seed);
-        assert.equal(run.refused, 0, average + " " + burst + " " + seed);
+        assert.equal(run.noted, 0, average + " " + burst + " " + seed);
       }
     }
   }
@@ -239,7 +284,7 @@ test("a 1 Hz host still delivers 30 spawns each second", () => {
     for (let n = 0; n < wide.spawnPerSecond; n++) run.send(spawn(id++, tick));
   }
   assert.deepEqual(run.kicks, []);
-  assert.equal(run.drops, 0);
+  assert.equal(run.violations.includes("spawn_rate"), false);
 });
 
 test("a jumped header tick cannot mint a second burst", () => {
@@ -248,10 +293,10 @@ test("a jumped header tick cannot mint a second burst", () => {
   for (let id = 1; id <= 120; id++) run.send(spawn(id, 0));
   const before = run.sent;
   now = 10;
-  for (let id = 121; id <= 150; id++) run.send(spawn(id, 5000));
+  for (let id = 121; id <= 320; id++) run.send(spawn(id, 5000));
   assert.deepEqual(run.kicks, []);
-  assert.ok(run.sent - before < 15, String(run.sent - before));
-  assert.ok(run.drops > 0);
+  assert.equal(run.sent - before, 200);
+  assert.ok(run.violations.includes("spawn_rate"));
 });
 
 test("violations stay a short ring", () => {
@@ -261,6 +306,24 @@ test("violations stay a short ring", () => {
   assert.ok(mediator.violations.length <= 32, String(mediator.violations.length));
   assert.equal(mediator.violations[mediator.violations.length - 1], "spawn_rate");
 });
+
+/** @param {number} late */
+function catchUp(late) {
+  let now = 0;
+  const run = wire(wide, () => now);
+  for (let id = 1; id <= 120; id++) run.send(spawn(id, 0));
+  const steps = Math.round((late / 1000) * wide.tickHz);
+  let id = 121;
+  let extra = 0;
+  for (let tick = 1; tick <= steps; tick++) {
+    const n = tick % 2 === 0 ? 1 : 2;
+    for (let i = 0; i < n; i++) {
+      run.send(spawn(id++, tick));
+      extra += 1;
+    }
+  }
+  return { violations: run.violations, kicks: run.kicks, sent: run.sent, extra };
+}
 
 /** @param {any} manifest @param {() => number} now */
 function wire(manifest, now) {
@@ -281,8 +344,8 @@ function wire(manifest, now) {
   });
   return {
     kicks,
-    get drops() {
-      return mediator.spawnDrops;
+    get violations() {
+      return mediator.violations;
     },
     get sent() {
       return sent;
@@ -322,7 +385,19 @@ function jitterRun(average, burst, seed) {
       count -= n;
     }
   }
-  return { kicks: run.kicks.length, refused: run.drops };
+  return { kicks: run.kicks.length, noted: run.violations.length };
+}
+
+/** @param {any} mediator @param {(i: number) => Uint8Array} at @param {number} limit */
+function untilNoted(mediator, at, limit) {
+  let n = 0;
+  for (; n < limit; n++) {
+    const before = mediator.violations.length;
+    const result = mediator.inspect(at(n), { peer: "a", dir: "out" });
+    assert.equal(result.ok, true, String(n));
+    if (mediator.violations.length > before) return n;
+  }
+  return n;
 }
 
 /** @param {number} seed */
